@@ -1,0 +1,14 @@
+{
+  "abc123": {
+    "name": "Test Node",
+    "public_key": "abc123",
+    "lat": -21.123456,
+    "lon": -47.654321,
+    "type": 1,
+    "tx_power": 22,
+    "last_seen": 1788477000,
+    "last_rssi": -55,
+    "last_snr": 12.5,
+    "last_hops": 0
+  }
+}
