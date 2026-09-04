@@ -102,13 +102,13 @@ async def on_rx_log(event):
     snr = rx.get('snr', '?')
     plen = rx.get('payload_length', '?')
     path = rx.get('path', '')
-    print(f"📡 RX: type={ptype} route={rtype} rssi={rssi}dBm snr={snr}dB len={plen} path={path}")
+    print(f"\n📡 RX: type={ptype} route={rtype} rssi={rssi}dBm snr={snr}dB len={plen} path={path}")
 
 
 async def on_log_data(event):
     """Handle LOG_DATA events."""
     log = event.payload or {}
-    print(f"📝 LOG: {log}")
+    print(f"\n📝 LOG: {log}")
 
 
 async def on_node_info(event):
