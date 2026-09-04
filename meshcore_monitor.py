@@ -8,20 +8,31 @@ and displays all received data formatted correctly.
 """
 import asyncio
 import json
+import re
 import sys
 import time
 import termios
 import tty
 import textwrap
+from datetime import datetime
 from pathlib import Path
-from meshcore import MeshCore, EventType
+from typing import Optional
 
-SERIAL_PORT = "/dev/ttyUSB2"
+import aiohttp
+from meshcore import MeshCore, EventType
+from meshcore.commands import MessagingCommands
+
+SERIAL_PORT = "/dev/ttyUSB0"
 BAUDRATE = 115200
 KNOWN_NODES_FILE = Path("known_nodes.json")
 
 # Display width for boxes
 BOX_WIDTH = 72
+
+# METAR API Configuration
+METAR_API_KEY = "KeBTpXyYGmcJnUTysDTUkqQ69J3bzoKpnY5TQGV0"
+METAR_API_BASE = "https://api-redemet.decea.mil.br/mensagens/metar"
+MAX_MESSAGE_LENGTH = 130
 
 
 def wrap_text(text, width=BOX_WIDTH - 4):
@@ -33,6 +44,90 @@ def wrap_text(text, width=BOX_WIDTH - 4):
     for line in lines:
         wrapped.extend(textwrap.wrap(line, width=width) or [""])
     return wrapped
+
+
+async def fetch_metar(airport: str) -> Optional[str]:
+    """Fetch METAR data from REDEMET API for given airport."""
+    today = datetime.now().strftime("%Y%m%d")
+    url = f"{METAR_API_BASE}/{airport}?api_key={METAR_API_KEY}&inicialData={today}&finalData={today}"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    return None
+                data = await response.json()
+                
+                if not data.get("status") or not data.get("data", {}).get("data"):
+                    return None
+                
+                metar_data = data["data"]["data"][0]
+                mens = metar_data.get("mens", "")
+                recebimento = metar_data.get("recebimento", "")
+                
+                if not mens:
+                    return None
+                
+                # Parse timestamp from recebimento (format: "2026-09-04 20:00:00")
+                timestamp_str = ""
+                if recebimento:
+                    try:
+                        dt = datetime.strptime(recebimento, "%Y-%m-%d %H:%M:%S")
+                        timestamp_str = dt.strftime("%H:%M %d/%m/%Y")
+                    except ValueError:
+                        pass
+                
+                # Format message: "METAR ... HH:MM DD/MM/YYYY"
+                if timestamp_str:
+                    formatted = f"{mens} {timestamp_str}"
+                else:
+                    formatted = mens
+                
+                # Ensure max 130 chars - if too long, remove timestamp
+                if len(formatted) > MAX_MESSAGE_LENGTH:
+                    formatted = mens
+                    if len(formatted) > MAX_MESSAGE_LENGTH:
+                        formatted = formatted[:MAX_MESSAGE_LENGTH]
+                
+                return formatted
+    except Exception as e:
+        print(f"⚠️  Error fetching METAR: {e}")
+        return None
+
+
+def parse_metar_command(text: str) -> Optional[str]:
+    """Parse METAR command from text. Returns airport code or None."""
+    # Match METAR <AIRPORT> case insensitive, flexible spacing
+    match = re.search(r'\bMETAR\s+([A-Z0-9]{4})\b', text, re.IGNORECASE)
+    if match:
+        return match.group(1).upper()
+    return None
+
+
+async def handle_metar_request(meshcore, event, text: str, is_channel: bool, channel_idx: Optional[int] = None, sender_pubkey: Optional[str] = None):
+    """Handle METAR request and send response."""
+    airport = parse_metar_command(text)
+    if not airport:
+        error_msg = "Formato: METAR <AEROPORTO> (ex: METAR SBRP)"
+        if is_channel and channel_idx is not None:
+            await meshcore.commands.send_chan_msg(channel_idx, error_msg)
+        elif not is_channel and sender_pubkey:
+            await meshcore.commands.send_msg(sender_pubkey, error_msg)
+        return
+    
+    metar_result = await fetch_metar(airport)
+    if not metar_result:
+        error_msg = f"METAR nao encontrado para {airport}"
+        if is_channel and channel_idx is not None:
+            await meshcore.commands.send_chan_msg(channel_idx, error_msg)
+        elif not is_channel and sender_pubkey:
+            await meshcore.commands.send_msg(sender_pubkey, error_msg)
+        return
+    
+    if is_channel and channel_idx is not None:
+        await meshcore.commands.send_chan_msg(channel_idx, metar_result)
+    elif not is_channel and sender_pubkey:
+        await meshcore.commands.send_msg(sender_pubkey, metar_result)
 
 
 def load_known_nodes():
@@ -88,10 +183,23 @@ def _print_lines(lines):
     sys.stdout.flush()
 
 
-async def on_contact_message(event):
+async def on_contact_message(event, meshcore=None):
     """Handle incoming contact messages (DMs)."""
     msg = event.payload or {}
     text = msg.get('text', '')
+    sender_pubkey = msg.get('from', msg.get('sender_pubkey', msg.get('sender', '')))
+    
+    # If no direct pubkey field, try pubkey_prefix and lookup in known_nodes
+    if not sender_pubkey:
+        pubkey_prefix = msg.get('pubkey_prefix', '')
+        if pubkey_prefix:
+            # Look up full pubkey in known_nodes
+            known_nodes = load_known_nodes()
+            for full_pubkey, node_info in known_nodes.items():
+                if full_pubkey.startswith(pubkey_prefix):
+                    sender_pubkey = full_pubkey
+                    break
+    
     lines = [
         f"\n{'='*BOX_WIDTH}",
         f"📩 CONTACT MESSAGE (DM)",
@@ -105,9 +213,13 @@ async def on_contact_message(event):
         f"{'='*BOX_WIDTH}\n",
     ])
     _print_lines(lines)
+    
+    # Handle METAR command in DMs
+    if meshcore:
+        await handle_metar_request(meshcore, event, text, is_channel=False, sender_pubkey=sender_pubkey)
 
 
-async def on_channel_message(event):
+async def on_channel_message(event, meshcore=None):
     """Handle incoming channel messages (all channels)."""
     msg = event.payload or {}
     channel_idx = msg.get('channel_idx', '?')
@@ -334,10 +446,16 @@ async def main():
     async def advert_path_handler(e):
         await on_advert_path(e, known_nodes)
     
+    async def channel_msg_handler(e):
+        await on_channel_message(e, meshcore)
+    
+    async def contact_msg_handler(e):
+        await on_contact_message(e, meshcore)
+    
     # Subscribe to events
     subscriptions = [
-        meshcore.subscribe(EventType.CONTACT_MSG_RECV, on_contact_message),
-        meshcore.subscribe(EventType.CHANNEL_MSG_RECV, on_channel_message),
+        meshcore.subscribe(EventType.CONTACT_MSG_RECV, contact_msg_handler),
+        meshcore.subscribe(EventType.CHANNEL_MSG_RECV, channel_msg_handler),
         meshcore.subscribe(EventType.RX_LOG_DATA, on_rx_log),
         meshcore.subscribe(EventType.LOG_DATA, on_log_data),
         meshcore.subscribe(EventType.DEVICE_INFO, on_node_info),

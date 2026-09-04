@@ -22,5 +22,17 @@
     "last_rssi": "?",
     "last_snr": "?",
     "last_hops": "?"
+  },
+  "1c3597df253e34df689b505beb3173e840730abd14c8cafc33508352fc86de07": {
+    "name": "unknown",
+    "public_key": "1c3597df253e34df689b505beb3173e840730abd14c8cafc33508352fc86de07",
+    "lat": 0,
+    "lon": 0,
+    "type": 0,
+    "tx_power": "?",
+    "last_seen": 1788484461,
+    "last_rssi": "?",
+    "last_snr": "?",
+    "last_hops": "?"
   }
 }

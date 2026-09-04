@@ -4,7 +4,7 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 
 ## 📋 Funcionalidades
 
-- **Conexão serial** com nó MeshCore Companion (porta `/dev/ttyUSB2` @ 115200 baud)
+- **Conexão serial** com nó MeshCore Companion (porta `/dev/ttyUSB0` @ 115200 baud)
 - **Informações do dispositivo**: modelo, firmware, configuração de rádio (frequência, SF, BW, CR)
 - **Lista de contatos** com nomes, tipos (CONTACT/REPEATER/ROOM), chaves públicas e localização
 - **Canais configurados** (ex: canal 0 "Public")
@@ -16,6 +16,7 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
   - **Advertisements (anúncios)** com captura automática de dados do anunciante
   - Eventos de sistema (bateria, telemetria, stats, etc.)
 - **Armazenamento persistente** de nós conhecidos em `known_nodes.json`
+- **Consulta METAR via REDEMET API** - Responde a DMs com `METAR <ICAO>` (ex: `METAR SBRP`) retornando dados meteorológicos formatados
 
 ## 🔧 Requisitos
 
@@ -27,11 +28,11 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 
 ```bash
 # Instalar SDK MeshCore
-pip install meshcore
+pip install meshcore aiohttp
 
 # Verificar porta serial
 ls -la /dev/ttyUSB*
-# Deve mostrar /dev/ttyUSB2 (ajuste no código se diferente)
+# Deve mostrar /dev/ttyUSB0 (ajuste no código se diferente)
 
 # Adicionar usuário ao grupo dialout (se necessário)
 sudo usermod -a -G dialout $USER
@@ -204,6 +205,50 @@ O monitor cria/atualiza automaticamente o arquivo `known_nodes.json` com todos o
 | `STATS_*` | Estatísticas (core, radio, packets) |
 | `PATH_UPDATE` | Atualizações de roteamento |
 
+## 🌤️ Consulta METAR (REDEMET)
+
+O bot responde automaticamente a **mensagens diretas (DMs)** contendo o comando `METAR <ICAO>`.
+
+### Formato do comando
+```
+METAR SBRP
+metar SBGR
+Metar   SBGL
+```
+
+- Case-insensitive (maiúsculo/minúsculo não importa)
+- Espaçamento flexível
+- Código ICAO do aeroporto (4 letras, ex: SBRP, SBGR, SBGL, SBPA)
+
+### Resposta do bot
+O bot consulta a API da REDEMET (api-redemet.decea.mil.br) e retorna:
+- Código METAR completo
+- Data/hora do recebimento (HH:MM DD/MM/AAAA)
+- Limitado a **130 caracteres** (padrão MeshCore) - se exceder, remove o timestamp
+
+### Exemplos
+**Entrada (DM):**
+```
+METAR SBRP
+```
+
+**Saída (DM de resposta):**
+```
+METAR SBRP 042000Z 25007KT CAVOK 34/09 Q1011= 20:00 04/09/2026
+```
+
+**Se não encontrar:**
+```
+METAR nao encontrado para SBRP
+```
+
+**Formato inválido:**
+```
+Formato: METAR <AEROPORTO> (ex: METAR SBRP)
+```
+
+> **Nota:** O bot **não responde em canais públicos** para não poluir a rede - apenas em DMs (mensagens privadas).
+
 ## ⌨️ Atalhos de Teclado
 
 | Tecla | Ação |
@@ -218,7 +263,7 @@ O monitor cria/atualiza automaticamente o arquivo `known_nodes.json` com todos o
 Edite `meshcore_monitor.py` para ajustar:
 
 ```python
-SERIAL_PORT = "/dev/ttyUSB2"  # Porta serial do nó
+SERIAL_PORT = "/dev/ttyUSB0"  # Porta serial do nó
 BAUDRATE = 115200              # Baud rate (padrão MeshCore)
 KNOWN_NODES_FILE = Path("known_nodes.json")  # Arquivo de nós conhecidos
 ```
