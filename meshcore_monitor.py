@@ -12,12 +12,27 @@ import sys
 import time
 import termios
 import tty
+import textwrap
 from pathlib import Path
 from meshcore import MeshCore, EventType
 
 SERIAL_PORT = "/dev/ttyUSB2"
 BAUDRATE = 115200
 KNOWN_NODES_FILE = Path("known_nodes.json")
+
+# Display width for boxes
+BOX_WIDTH = 72
+
+
+def wrap_text(text, width=BOX_WIDTH - 4):
+    """Wrap text to fit in box."""
+    if not text:
+        return [""]
+    lines = text.split('\n')
+    wrapped = []
+    for line in lines:
+        wrapped.extend(textwrap.wrap(line, width=width) or [""])
+    return wrapped
 
 
 def load_known_nodes():
@@ -66,31 +81,50 @@ def format_channel(channel):
     return f"  [{idx}] {name} (hash={chash}) role={role_names.get(role, role)}"
 
 
+def _print_lines(lines):
+    """Print lines with explicit flush to avoid terminal rendering issues."""
+    out = '\r\n'.join(lines) + '\r\n'
+    sys.stdout.write(out)
+    sys.stdout.flush()
+
+
 async def on_contact_message(event):
     """Handle incoming contact messages (DMs)."""
     msg = event.payload or {}
-    print(f"\n{'='*70}")
-    print(f"📩 CONTACT MESSAGE (DM)")
-    print(f"{'='*70}")
-    print(f"  Text: {msg.get('text', '')}")
-    print(f"  Time: {msg.get('sender_timestamp', msg.get('timestamp', 'unknown'))}")
-    print(f"  Hops: {msg.get('path_len', '?')}")
-    print(f"  SNR:  {msg.get('SNR', msg.get('rssi', '?'))}dB")
-    print(f"{'='*70}\n")
+    text = msg.get('text', '')
+    lines = [
+        f"\n{'='*BOX_WIDTH}",
+        f"📩 CONTACT MESSAGE (DM)",
+        f"{'='*BOX_WIDTH}",
+    ]
+    lines.extend(f"  {line}" for line in wrap_text(text))
+    lines.extend([
+        f"  Time: {msg.get('sender_timestamp', msg.get('timestamp', 'unknown'))}",
+        f"  Hops: {msg.get('path_len', '?')}",
+        f"  SNR:  {msg.get('SNR', msg.get('rssi', '?'))}dB",
+        f"{'='*BOX_WIDTH}\n",
+    ])
+    _print_lines(lines)
 
 
 async def on_channel_message(event):
     """Handle incoming channel messages (all channels)."""
     msg = event.payload or {}
     channel_idx = msg.get('channel_idx', '?')
-    print(f"\n{'='*70}")
-    print(f"📢 CHANNEL MESSAGE #{channel_idx}")
-    print(f"{'='*70}")
-    print(f"  Text: {msg.get('text', '')}")
-    print(f"  Time: {msg.get('sender_timestamp', msg.get('timestamp', 'unknown'))}")
-    print(f"  Hops: {msg.get('path_len', '?')}")
-    print(f"  SNR:  {msg.get('SNR', msg.get('rssi', '?'))}dB")
-    print(f"{'='*70}\n")
+    text = msg.get('text', '')
+    lines = [
+        f"\n{'='*BOX_WIDTH}",
+        f"📢 CHANNEL MESSAGE #{channel_idx}",
+        f"{'='*BOX_WIDTH}",
+    ]
+    lines.extend(f"  {line}" for line in wrap_text(text))
+    lines.extend([
+        f"  Time: {msg.get('sender_timestamp', msg.get('timestamp', 'unknown'))}",
+        f"  Hops: {msg.get('path_len', '?')}",
+        f"  SNR:  {msg.get('SNR', msg.get('rssi', '?'))}dB",
+        f"{'='*BOX_WIDTH}\n",
+    ])
+    _print_lines(lines)
 
 
 async def on_rx_log(event):
@@ -102,64 +136,71 @@ async def on_rx_log(event):
     snr = rx.get('snr', '?')
     plen = rx.get('payload_length', '?')
     path = rx.get('path', '')
-    print(f"\n📡 RX: type={ptype} route={rtype} rssi={rssi}dBm snr={snr}dB len={plen} path={path}")
+    # Compact single-line format
+    sys.stdout.write(f"\r\n📡 RX: {ptype}/{rtype} rssi={rssi}dBm snr={snr}dB len={plen} path={path}\r\n")
+    sys.stdout.flush()
 
 
 async def on_log_data(event):
     """Handle LOG_DATA events."""
     log = event.payload or {}
-    print(f"\n📝 LOG: {log}")
+    sys.stdout.write(f"\r\n📝 LOG: {log}\r\n")
+    sys.stdout.flush()
 
 
 async def on_node_info(event):
     """Handle node info events."""
     info = event.payload or {}
-    print(f"\n{'='*70}")
-    print(f"📋 NODE INFO")
-    print(f"{'='*70}")
-    for k, v in info.items():
-        print(f"  {k}: {v}")
-    print(f"{'='*70}\n")
+    lines = [
+        f"\n{'='*BOX_WIDTH}",
+        f"📋 NODE INFO",
+        f"{'='*BOX_WIDTH}",
+    ]
+    lines.extend(f"  {k}: {v}" for k, v in info.items())
+    lines.append(f"{'='*BOX_WIDTH}\n")
+    _print_lines(lines)
 
 
 async def on_contact_list(event):
     """Handle contact list events."""
     payload = event.payload
-    print(f"\n{'='*70}")
-    print(f"👥 CONTACT LIST")
-    print(f"{'='*70}")
+    lines = [
+        f"\n{'='*BOX_WIDTH}",
+        f"👥 CONTACT LIST",
+        f"{'='*BOX_WIDTH}",
+    ]
     if isinstance(payload, dict):
         for key, contact in payload.items():
             if isinstance(contact, dict):
-                print(format_contact(contact))
+                lines.append(format_contact(contact))
             else:
-                print(f"  {key}: {contact}")
+                lines.append(f"  {key}: {contact}")
     elif isinstance(payload, list):
         for contact in payload:
             if isinstance(contact, dict):
-                print(format_contact(contact))
+                lines.append(format_contact(contact))
     else:
-        print(f"  {payload}")
-    print(f"{'='*70}\n")
+        lines.append(f"  {payload}")
+    lines.append(f"{'='*BOX_WIDTH}\n")
+    _print_lines(lines)
 
 
 async def on_self_info(event):
     """Handle self info events."""
     info = event.payload or {}
-    print(f"\n{'='*70}")
-    print(f"🔧 SELF INFO")
-    print(f"{'='*70}")
-    for k, v in info.items():
-        print(f"  {k}: {v}")
-    print(f"{'='*70}\n")
+    lines = [
+        f"\n{'='*BOX_WIDTH}",
+        f"🔧 SELF INFO",
+        f"{'='*BOX_WIDTH}",
+    ]
+    lines.extend(f"  {k}: {v}" for k, v in info.items())
+    lines.append(f"{'='*BOX_WIDTH}\n")
+    _print_lines(lines)
 
 
 async def on_advertisement(event, known_nodes):
     """Handle advertisement events - capture advertiser info."""
     adv = event.payload or {}
-    print(f"\n{'='*70}")
-    print(f"📢 ADVERTISEMENT RECEIVED")
-    print(f"{'='*70}")
     
     # Extract advertiser info
     pubkey = adv.get('public_key', adv.get('from', ''))
@@ -173,15 +214,21 @@ async def on_advertisement(event, known_nodes):
     path_len = adv.get('path_len', '?')
     timestamp = adv.get('timestamp', int(time.time()))
     
-    print(f"  Name:       {name}")
-    print(f"  Public Key: {pubkey}")
-    print(f"  Location:   lat={lat:.6f} lon={lon:.6f}" if lat != 0 or lon != 0 else "  Location:   not set")
-    print(f"  Type:       {adv_type}")
-    print(f"  TX Power:   {tx_power}dBm")
-    print(f"  RSSI/SNR:   {rssi}dBm / {snr}dB")
-    print(f"  Hops:       {path_len}")
-    print(f"  Time:       {timestamp}")
-    print(f"{'='*70}\n")
+    lines = [
+        f"\n{'='*BOX_WIDTH}",
+        f"📢 ADVERTISEMENT RECEIVED",
+        f"{'='*BOX_WIDTH}",
+        f"  Name:       {name}",
+        f"  Public Key: {pubkey}",
+        f"  Location:   lat={lat:.6f} lon={lon:.6f}" if lat != 0 or lon != 0 else "  Location:   not set",
+        f"  Type:       {adv_type}",
+        f"  TX Power:   {tx_power}dBm",
+        f"  RSSI/SNR:   {rssi}dBm / {snr}dB",
+        f"  Hops:       {path_len}",
+        f"  Time:       {timestamp}",
+        f"{'='*BOX_WIDTH}\n",
+    ]
+    _print_lines(lines)
     
     # Save to known nodes
     if pubkey:
@@ -198,13 +245,15 @@ async def on_advertisement(event, known_nodes):
             'last_hops': path_len,
         }
         save_known_nodes(known_nodes)
-        print(f"💾 Saved/updated {name} ({pubkey[:12]}...) in known_nodes.json")
+        sys.stdout.write(f"\r\n💾 Saved/updated {name} ({pubkey[:12]}...) in known_nodes.json\r\n")
+        sys.stdout.flush()
 
 
 async def on_advert_path(event, known_nodes):
     """Handle advertisement path events."""
     adv = event.payload or {}
-    print(f"\n📍 ADVERT PATH: {adv}")
+    sys.stdout.write(f"\r\n📍 ADVERT PATH: {adv}\r\n")
+    sys.stdout.flush()
 
 
 async def on_generic_event(event):
@@ -212,7 +261,8 @@ async def on_generic_event(event):
     ename = event.type.name
     if ename in ('NO_MORE_MSGS', 'OK', 'CONNECTED', 'DISCONNECTED', 'ACK', 'MESSAGES_WAITING'):
         return  # Skip noisy events
-    print(f"\n🔔 {ename}: {event.payload}")
+    sys.stdout.write(f"\r\n🔔 {ename}: {event.payload}\r\n")
+    sys.stdout.flush()
 
 
 async def connect_with_retry(max_retries=3):
@@ -277,6 +327,13 @@ async def main():
         print("❌ Failed to connect after retries")
         sys.exit(1)
 
+    # Advertisement handlers with known_nodes reference
+    async def advert_handler(e):
+        await on_advertisement(e, known_nodes)
+    
+    async def advert_path_handler(e):
+        await on_advert_path(e, known_nodes)
+    
     # Subscribe to events
     subscriptions = [
         meshcore.subscribe(EventType.CONTACT_MSG_RECV, on_contact_message),
@@ -288,8 +345,8 @@ async def main():
         meshcore.subscribe(EventType.SELF_INFO, on_self_info),
         
         # Advertisement handlers with known_nodes reference
-        meshcore.subscribe(EventType.ADVERTISEMENT, lambda e: on_advertisement(e, known_nodes)),
-        meshcore.subscribe(EventType.ADVERT_PATH, lambda e: on_advert_path(e, known_nodes)),
+        meshcore.subscribe(EventType.ADVERTISEMENT, advert_handler),
+        meshcore.subscribe(EventType.ADVERT_PATH, advert_path_handler),
         
         meshcore.subscribe(EventType.CONTACT_DELETED, on_generic_event),
         meshcore.subscribe(EventType.CONTACTS_FULL, on_generic_event),
