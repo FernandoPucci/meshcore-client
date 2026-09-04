@@ -10,5 +10,17 @@
     "last_rssi": -55,
     "last_snr": 12.5,
     "last_hops": 0
+  },
+  "a952afa5ab77a6de284a4b3e38aef0017f30dc34e1c5efb74d60b3e16f1f57bb": {
+    "name": "unknown",
+    "public_key": "a952afa5ab77a6de284a4b3e38aef0017f30dc34e1c5efb74d60b3e16f1f57bb",
+    "lat": 0,
+    "lon": 0,
+    "type": 0,
+    "tx_power": "?",
+    "last_seen": 1788484086,
+    "last_rssi": "?",
+    "last_snr": "?",
+    "last_hops": "?"
   }
 }
