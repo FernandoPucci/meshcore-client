@@ -307,6 +307,8 @@ async def handle_metar_request(meshcore, event, text: str, is_channel: bool, cha
     if is_channel and channel_idx is not None:
         await meshcore.commands.send_chan_msg(channel_idx, metar_result)
     elif not is_channel and sender_pubkey:
+        # Set flood scope to "*" (force unscoped) so the response floods through the mesh network
+        await meshcore.commands.set_flood_scope("*", force_unscoped=True)
         await meshcore.commands.send_msg(sender_pubkey, metar_result)
 
 
