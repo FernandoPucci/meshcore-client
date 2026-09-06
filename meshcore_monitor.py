@@ -433,8 +433,11 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
     if not text:
         return
     
+    # Use the full node name with robot emoji for mention matching
+    bot_name_with_emoji = f"{MY_NODE_NAME} 🤖"
+    
     # Check for mention pattern: @[node_name] COMMAND
-    mention_pattern = rf'@\[{re.escape(MY_NODE_NAME)}\]\s+(.+)'
+    mention_pattern = rf'@\[{re.escape(bot_name_with_emoji)}\]\s+(.+)'
     match = re.search(mention_pattern, text, re.IGNORECASE)
     if not match:
         return
@@ -446,7 +449,7 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
     if re.search(r'\b(AJUDA|HELP)\b', command_upper):
         print(f"❓ Channel #{channel_idx}: @mention AJUDA/HELP request")
         help_msg = (
-            f"Comandos disponiveis para @[{MY_NODE_NAME}]:\n"
+            f"Comandos disponiveis para @[{bot_name_with_emoji}]:\n"
             f"  METAR <ICAO> - Consulta METAR (ex: METAR SBRP)\n"
             f"  CLIMA - Previsao do tempo atual\n"
             f"  AJUDA / HELP - Esta mensagem"
