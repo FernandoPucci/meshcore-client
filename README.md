@@ -18,6 +18,7 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 - **Armazenamento persistente** de nós conhecidos em `known_nodes.json`
 - **Consulta METAR via REDEMET API** - Responde a DMs com `METAR <ICAO>` (ex: `METAR SBRP`) retornando dados meteorológicos formatados
 - **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal #Public: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
+- **Envio automático de tempo/clima (cron)** - Configurável via variáveis de ambiente: envia periodicamente no canal #Public com emoji + descrição em português do tempo e fase da lua
 
 ## 🔧 Requisitos
 
@@ -53,6 +54,23 @@ python3 meshcore_monitor.py
 ```
 
 **Nota:** O atalho Ctrl+A funciona apenas quando executado em terminal interativo (TTY).
+
+### Envio Automático de Tempo/Clima (Cron via Variável de Ambiente)
+
+Configure as variáveis abaixo no `.env` para habilitar o envio periódico automático:
+
+```bash
+# Habilita envio automático (true/false)
+WEATHER_AUTO_SEND_ENABLED=true
+
+# Intervalo em minutos (padrão: 30)
+WEATHER_AUTO_SEND_INTERVAL=30
+
+# Índice do canal destino (padrão: 0 = #Public)
+WEATHER_AUTO_SEND_CHANNEL=0
+```
+
+Ao habilitar, o sistema envia a previsão **imediatamente na inicialização** e depois a cada N minutos configurados. A mensagem inclui emoji + **descrição completa em português** do código do tempo (WMO) e fase da lua.
 
 ## 📊 Saída Esperada
 
@@ -251,16 +269,16 @@ Formato: METAR <AEROPORTO> (ex: METAR SBRP)
 
 > **Nota:** O bot **não responde em canais públicos** para não poluir a rede - apenas em DMs (mensagens privadas).
 
-## 🌤️ Tempo/Clima no Canal #Public (Ctrl+F)
+## 🌤️ Tempo/Clima no Canal #Public (Ctrl+F e Automático)
 
-Ao pressionar **Ctrl+F**, o monitor consulta a API **Open-Meteo** para Ribeirão Preto e publica uma mensagem formatada no canal **#Public** (índice 0).
+Ao pressionar **Ctrl+F**, ou automaticamente via cron (se habilitado), o monitor consulta a API **Open-Meteo** para Ribeirão Preto e publica uma mensagem formatada no canal **#Public** (índice 0, configurável).
 
 ### Formato da mensagem (um item por linha, máx. 130 chars)
 
 ```
-Clima RAO ☀️
+Clima RAO ☀️ Céu limpo
 25°C 65%
-🌕 0.52
+🌕 Lua cheia
 14:30 05/09/2026
 ```
 
@@ -268,36 +286,40 @@ Clima RAO ☀️
 
 | Item | Descrição | Fonte |
 |------|-----------|-------|
-| `Clima RAO` | Prefixo fixo + emoji do tempo | `weather_code` |
+| `Clima RAO ☀️ Céu limpo` | Prefixo + emoji do tempo + **descrição em PT** | `weather_code` |
 | `25°C 65%` | Temperatura + umidade relativa | `temperature_2m`, `relative_humidity_2m` |
-| `🌕 0.52` | Emoji da fase da lua + valor | `moon_phase` (daily) |
+| `🌕 Lua cheia` | Emoji da fase da lua + **descrição em PT** | `moon_phase` (daily) |
 | `14:30 05/09/2026` | Hora e data local | `datetime.now()` (timezone America/Sao_Paulo) |
 
 ### Emojis de tempo (weather_code)
 
-| Código | Condição | Emoji |
-|--------|----------|-------|
-| 0 | Céu limpo | ☀️ |
-| 1-3 | Parcialmente nublado a nublado | 🌤️ ⛅ ☁️ |
-| 45, 48 | Neblina | 🌫️ |
-| 51-57 | Chuvisco | 🌦️ 🌧️ |
-| 61-67 | Chuva | 🌦️ 🌧️ |
-| 71-77 | Neve | 🌨️ |
-| 80-82 | Pancadas de chuva | 🌦️ 🌧️ |
-| 85-86 | Pancadas de neve | 🌨️ |
-| 95-99 | Tempestade | ⛈️ |
+| Código | Condição | Emoji | Descrição PT |
+|--------|----------|-------|--------------|
+| 0 | Céu limpo | ☀️ | Céu limpo |
+| 1 | Principalmente limpo | 🌤️ | Principalmente limpo |
+| 2 | Parcialmente nublado | ⛅ | Parcialmente nublado |
+| 3 | Nublado | ☁️ | Nublado |
+| 45, 48 | Neblina | 🌫️ | Neblina / Neblina com geada |
+| 51-57 | Chuvisco | 🌦️ 🌧️ | Chuvisco leve a denso / congelante |
+| 61-67 | Chuva | 🌦️ 🌧️ | Chuva leve a forte / congelante |
+| 71-77 | Neve | 🌨️ | Neve leve a forte / grãos |
+| 80-82 | Pancadas de chuva | 🌦️ 🌧️ | Pancadas leves a violentas |
+| 85-86 | Pancadas de neve | 🌨️ | Pancadas leves a fortes |
+| 95-99 | Tempestade | ⛈️ | Trovoada / com granizo |
 
 ### Emojis de fase da lua (moon_phase 0.0-1.0)
 
-| Fase | Intervalo | Emoji |
-|------|-----------|-------|
-| Lua Nova | 0.00-0.06, 0.50-0.56 | 🌑 |
-| Lua Crescente | 0.06-0.19, 0.56-0.69 | 🌒 🌓 |
-| Quarto Crescente | 0.19-0.25, 0.69-0.75 | 🌔 |
-| Lua Cheia | 0.25-0.31, 0.75-0.81 | 🌕 |
-| Quarto Minguante | 0.31-0.38, 0.81-0.88 | 🌖 🌗 |
-| Lua Minguante | 0.38-0.44, 0.88-0.94 | 🌘 |
-| Lua Nova (fim) | 0.94-1.00 | 🌘 |
+| Fase | Intervalo | Emoji | Descrição PT |
+|------|-----------|-------|--------------|
+| Lua Nova | 0.00-0.06 | 🌑 | Lua nova |
+| Lua Crescente | 0.06-0.19 | 🌒 | Lua crescente |
+| Quarto Crescente | 0.19-0.31 | 🌓 | Quarto crescente |
+| Lua Gibosa Crescente | 0.31-0.44 | 🌔 | Lua gibosa crescente |
+| Lua Cheia | 0.44-0.56 | 🌕 | Lua cheia |
+| Lua Gibosa Minguante | 0.56-0.69 | 🌖 | Lua gibosa minguante |
+| Quarto Minguante | 0.69-0.81 | 🌗 | Quarto minguante |
+| Lua Minguante | 0.81-0.94 | 🌘 | Lua minguante |
+| Lua Nova (fim) | 0.94-1.00 | 🌑 | Lua nova |
 
 ### Exemplo de chamada API
 
@@ -336,6 +358,11 @@ OPEN_METEO_LONGITUDE=-47.8103
 OPEN_METEO_BASE=https://api.open-meteo.com/v1/forecast
 
 MAX_MESSAGE_LENGTH=130
+
+# Auto Weather Sending (Cron via variável de ambiente)
+WEATHER_AUTO_SEND_ENABLED=false
+WEATHER_AUTO_SEND_INTERVAL=30
+WEATHER_AUTO_SEND_CHANNEL=0
 ```
 
 ### Variáveis de ambiente principais
@@ -347,6 +374,9 @@ MAX_MESSAGE_LENGTH=130
 | `OPEN_METEO_LATITUDE` | Latitude para consulta de tempo | `-21.1775` (Ribeirão Preto) |
 | `OPEN_METEO_LONGITUDE` | Longitude para consulta de tempo | `-47.8103` (Ribeirão Preto) |
 | `MAX_MESSAGE_LENGTH` | Tamanho máximo da mensagem MeshCore | `130` |
+| `WEATHER_AUTO_SEND_ENABLED` | Habilita envio automático de tempo (true/false) | `false` |
+| `WEATHER_AUTO_SEND_INTERVAL` | Intervalo em minutos para envio automático | `30` |
+| `WEATHER_AUTO_SEND_CHANNEL` | Índice do canal destino (0 = #Public) | `0` |
 
 ## 🐛 Solução de Problemas
 

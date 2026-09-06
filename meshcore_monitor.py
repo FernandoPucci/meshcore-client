@@ -46,6 +46,11 @@ OPEN_METEO_BASE = os.getenv("OPEN_METEO_BASE", "https://api.open-meteo.com/v1/fo
 
 MAX_MESSAGE_LENGTH = int(os.getenv("MAX_MESSAGE_LENGTH", "130"))
 
+# Auto Weather Sending Configuration
+WEATHER_AUTO_SEND_ENABLED = os.getenv("WEATHER_AUTO_SEND_ENABLED", "false").lower() == "true"
+WEATHER_AUTO_SEND_INTERVAL = int(os.getenv("WEATHER_AUTO_SEND_INTERVAL", "30"))
+WEATHER_AUTO_SEND_CHANNEL = int(os.getenv("WEATHER_AUTO_SEND_CHANNEL", "0"))
+
 
 def wrap_text(text, width=BOX_WIDTH - 4):
     """Wrap text to fit in box."""
@@ -138,6 +143,37 @@ WEATHER_CODE_EMOJI = {
     99: "⛈️",
 }
 
+WEATHER_CODE_DESCRIPTION_PT = {
+    0: "Céu limpo",
+    1: "Principalmente limpo",
+    2: "Parcialmente nublado",
+    3: "Nublado",
+    45: "Neblina",
+    48: "Neblina com depósito de geada",
+    51: "Chuvisco leve",
+    53: "Chuvisco moderado",
+    55: "Chuvisco denso",
+    56: "Chuvisco congelante leve",
+    57: "Chuvisco congelante denso",
+    61: "Chuva leve",
+    63: "Chuva moderada",
+    65: "Chuva forte",
+    66: "Chuva congelante leve",
+    67: "Chuva congelante forte",
+    71: "Neve leve",
+    73: "Neve moderada",
+    75: "Neve forte",
+    77: "Grãos de neve",
+    80: "Pancadas de chuva leves",
+    81: "Pancadas de chuva moderadas",
+    82: "Pancadas de chuva violentas",
+    85: "Pancadas de neve leves",
+    86: "Pancadas de neve fortes",
+    95: "Trovoada",
+    96: "Trovoada com granizo leve",
+    99: "Trovoada com granizo forte",
+}
+
 MOON_PHASE_EMOJI = {
     (0.000, 0.0625): "🌑",
     (0.0625, 0.1875): "🌒",
@@ -150,12 +186,31 @@ MOON_PHASE_EMOJI = {
     (0.9375, 1.000): "🌑",
 }
 
+MOON_PHASE_DESCRIPTION_PT = {
+    (0.000, 0.0625): "Lua nova",
+    (0.0625, 0.1875): "Lua crescente",
+    (0.1875, 0.3125): "Quarto crescente",
+    (0.3125, 0.4375): "Lua gibosa crescente",
+    (0.4375, 0.5625): "Lua cheia",
+    (0.5625, 0.6875): "Lua gibosa minguante",
+    (0.6875, 0.8125): "Quarto minguante",
+    (0.8125, 0.9375): "Lua minguante",
+    (0.9375, 1.000): "Lua nova",
+}
+
 
 def get_moon_phase_emoji(phase: float) -> str:
     for (start, end), emoji in MOON_PHASE_EMOJI.items():
         if start <= phase < end:
             return emoji
     return "🌑"
+
+
+def get_moon_phase_description_pt(phase: float) -> str:
+    for (start, end), desc in MOON_PHASE_DESCRIPTION_PT.items():
+        if start <= phase < end:
+            return desc
+    return "Lua nova"
 
 
 async def fetch_weather() -> Optional[dict]:
@@ -201,12 +256,14 @@ def format_weather_message(weather_data: dict) -> Optional[str]:
     date_str = now.strftime("%d/%m/%Y")
 
     weather_emoji = WEATHER_CODE_EMOJI.get(weather_code, "❓")
+    weather_desc = WEATHER_CODE_DESCRIPTION_PT.get(weather_code, "Desconhecido")
     moon_emoji = get_moon_phase_emoji(moon_phase)
+    moon_desc = get_moon_phase_description_pt(moon_phase)
 
     lines = [
-        f"Clima RAO {weather_emoji}",
+        f"Clima RAO {weather_emoji} {weather_desc}",
         f"{temp}°C {humidity}%",
-        f"{moon_emoji} {moon_phase:.2f}",
+        f"{moon_emoji} {moon_desc}",
         f"{time_str} {date_str}",
     ]
 
@@ -553,6 +610,43 @@ async def send_weather_shortcut(meshcore):
         print(f"   ❌ {result.payload}")
 
 
+async def send_weather_to_channel(meshcore, channel_idx: int):
+    """Send weather to specified channel."""
+    weather_data = await fetch_weather()
+    if not weather_data:
+        print("   ❌ Failed to fetch weather for auto-send")
+        return
+    
+    message = format_weather_message(weather_data)
+    if not message:
+        print("   ❌ Failed to format weather message for auto-send")
+        return
+    
+    result = await meshcore.commands.send_chan_msg(channel_idx, message)
+    if result.type != EventType.ERROR:
+        print(f"   ✅ Auto weather sent to channel {channel_idx}")
+    else:
+        print(f"   ❌ Auto weather send failed: {result.payload}")
+
+
+async def auto_weather_sender(meshcore):
+    """Background task to periodically send weather to channel."""
+    if not WEATHER_AUTO_SEND_ENABLED:
+        return
+    
+    interval_seconds = WEATHER_AUTO_SEND_INTERVAL * 60
+    channel_idx = WEATHER_AUTO_SEND_CHANNEL
+    
+    print(f"🌤️  Auto weather sending enabled: every {WEATHER_AUTO_SEND_INTERVAL} min to channel #{channel_idx}")
+    
+    # Send immediately on start
+    await send_weather_to_channel(meshcore, channel_idx)
+    
+    while True:
+        await asyncio.sleep(interval_seconds)
+        await send_weather_to_channel(meshcore, channel_idx)
+
+
 async def keyboard_listener(meshcore):
     """Listen for keyboard input (Ctrl+A, Ctrl+F)."""
     fd = sys.stdin.fileno()
@@ -668,12 +762,15 @@ async def main():
     print("🎯 MONITORING ALL CHANNELS + ADVERTISEMENTS")
     print(f"💾 Known nodes saved to: {KNOWN_NODES_FILE}")
     print("⌨️  Ctrl+A = Send advert  |  Ctrl+F = Weather to #Public  |  Ctrl+C = Exit")
+    if WEATHER_AUTO_SEND_ENABLED:
+        print(f"🌤️  Auto weather: every {WEATHER_AUTO_SEND_INTERVAL} min to channel #{WEATHER_AUTO_SEND_CHANNEL}")
     print("="*70 + "\n")
 
-    # Run keyboard listener alongside main loop
+    # Run keyboard listener alongside main loop and auto weather sender
     try:
         await asyncio.gather(
             keyboard_listener(meshcore),
+            auto_weather_sender(meshcore),
             asyncio.Event().wait()  # Wait forever
         )
     except KeyboardInterrupt:
