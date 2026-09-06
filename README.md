@@ -333,31 +333,37 @@ https://api.open-meteo.com/v1/forecast?latitude=-21.1775&longitude=-47.8103&dail
 
 O bot monitora mensagens no canal #Public (e outros canais) e responde automaticamente quando é mencionado com o formato `@[NomeDoNo] COMANDO`.
 
+**Nota:** O nome do nó no dispositivo inclui automaticamente o emoji 🤖 (ex: `MeshMonitor 🤖`). A menção deve usar o nome completo com emoji.
+
 ### Comandos suportados
 
 | Comando | Descrição | Exemplo |
 |---------|-----------|---------|
-| `METAR <ICAO>` | Consulta METAR na REDEMET | `@[MeshMonitor] METAR SBRP` |
-| `CLIMA` | Consulta tempo/clima atual | `@[MeshMonitor] CLIMA` |
+| `METAR <ICAO>` | Consulta METAR na REDEMET | `@[MeshMonitor 🤖] METAR SBRP` |
+| `CLIMA` | Consulta tempo/clima atual | `@[MeshMonitor 🤖] CLIMA` |
+| `AJUDA` / `HELP` | Lista comandos disponíveis | `@[MeshMonitor 🤖] AJUDA` |
 
 ### Formato da menção
 
 ```
-@[NomeDoNo] METAR SBRP
-@[NomeDoNo] CLIMA
+@[NomeDoNo 🤖] METAR SBRP
+@[NomeDoNo 🤖] CLIMA
+@[NomeDoNo 🤖] AJUDA
 ```
 
-- O nome do nó deve corresponder exatamente à variável `MY_NODE_NAME` no `.env`
-- Case-insensitive para o comando (METAR/Clima/metar/clima)
+- O nome do nó deve corresponder ao nome no dispositivo (configurado via `MY_NODE_NAME` + 🤖)
+- Case-insensitive para o comando (METAR/Clima/Ajuda/Help/metar/clima/ajuda/help)
 - A resposta é enviada **no mesmo canal** onde a menção foi recebida
 - Para METAR: retorna o METAR completo com timestamp (máx. 130 chars)
 - Para CLIMA: retorna temperatura, umidade, fase da lua com descrição em português
+- Se enviar `METAR` sem código ICAO: retorna instrução de uso
+- Se enviar comando não reconhecido: retorna ajuda com comandos disponíveis
 
 ### Exemplo de interação
 
 **Usuário no #Public:**
 ```
-@[MeshMonitor] METAR SBRP
+@[MeshMonitor 🤖] METAR SBRP
 ```
 
 **Resposta do bot no #Public:**
@@ -367,7 +373,7 @@ METAR SBRP 062000Z 25007KT CAVOK 34/09 Q1011= 20:00 06/09/2026
 
 **Usuário no #Public:**
 ```
-@[MeshMonitor] CLIMA
+@[MeshMonitor 🤖] CLIMA
 ```
 
 **Resposta do bot no #Public:**
@@ -376,6 +382,40 @@ Clima RAO ☀️ Céu limpo
 25°C 65%
 🌕 Lua cheia
 14:30 06/09/2026
+```
+
+**Usuário no #Public:**
+```
+@[MeshMonitor 🤖] AJUDA
+```
+
+**Resposta do bot no #Public:**
+```
+Comandos disponiveis para @[MeshMonitor 🤖]:
+  METAR <ICAO> - Consulta METAR (ex: METAR SBRP)
+  CLIMA - Previsao do tempo atual
+  AJUDA / HELP - Esta mensagem
+```
+
+**Usuário no #Public (METAR sem aeroporto):**
+```
+@[MeshMonitor 🤖] METAR
+```
+
+**Resposta do bot no #Public:**
+```
+Para METAR adicione o codigo ICAO: METAR <AEROPORTO> (ex: METAR SBRP)
+```
+
+**Usuário no #Public (comando inválido):**
+```
+@[MeshMonitor 🤖] INVALIDO
+```
+
+**Resposta do bot no #Public:**
+```
+Comando nao reconhecido: INVALIDO
+Use @[MeshMonitor 🤖] AJUDA para ver comandos disponiveis
 ```
 
 ## ⌨️ Atalhos de Teclado
@@ -431,7 +471,9 @@ MY_NODE_NAME=MeshMonitor
 | `WEATHER_AUTO_SEND_ENABLED` | Habilita envio automático de tempo (true/false) | `false` |
 | `WEATHER_AUTO_SEND_INTERVAL` | Intervalo em minutos para envio automático | `30` |
 | `WEATHER_AUTO_SEND_CHANNEL` | Índice do canal destino (0 = #Public) | `0` |
-| `MY_NODE_NAME` | Nome do nó para @menções em canais | `MeshMonitor` |
+| `MY_NODE_NAME` | Nome base do nó (emoji 🤖 adicionado automaticamente) | `MeshMonitor` |
+
+> **Nota:** O sistema adiciona automaticamente o emoji 🤖 ao nome configurado em `MY_NODE_NAME` na inicialização. Ex: `MY_NODE_NAME=MeshMonitor` → nome no dispositivo = `MeshMonitor 🤖`. Use o nome completo com emoji nas @menções.
 
 ## 🐛 Solução de Problemas
 
