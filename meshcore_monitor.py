@@ -51,6 +51,9 @@ WEATHER_AUTO_SEND_ENABLED = os.getenv("WEATHER_AUTO_SEND_ENABLED", "false").lowe
 WEATHER_AUTO_SEND_INTERVAL = int(os.getenv("WEATHER_AUTO_SEND_INTERVAL", "30"))
 WEATHER_AUTO_SEND_CHANNEL = int(os.getenv("WEATHER_AUTO_SEND_CHANNEL", "0"))
 
+# Bot Node Name Configuration (for @mentions in channels)
+MY_NODE_NAME = os.getenv("MY_NODE_NAME", "MeshMonitor")
+
 
 def wrap_text(text, width=BOX_WIDTH - 4):
     """Wrap text to fit in box."""
@@ -420,6 +423,54 @@ async def on_channel_message(event, meshcore=None):
     ])
     _print_lines(lines)
 
+    # Handle @mentions for METAR and CLIMA commands in channel messages
+    if meshcore and channel_idx is not None:
+        await handle_channel_mention(meshcore, channel_idx, text)
+
+
+async def handle_channel_mention(meshcore, channel_idx: int, text: str):
+    """Handle @mentions in channel messages for METAR and CLIMA commands."""
+    if not text:
+        return
+    
+    # Check for mention pattern: @[node_name] COMMAND
+    mention_pattern = rf'@\[{re.escape(MY_NODE_NAME)}\]\s+(.+)'
+    match = re.search(mention_pattern, text, re.IGNORECASE)
+    if not match:
+        return
+    
+    command_text = match.group(1).strip()
+    
+    # Handle METAR command
+    metar_match = re.search(r'\bMETAR\s+([A-Z0-9]{4})\b', command_text, re.IGNORECASE)
+    if metar_match:
+        airport = metar_match.group(1).upper()
+        print(f"📍 Channel #{channel_idx}: @mention METAR request for {airport}")
+        metar_result = await fetch_metar(airport)
+        if metar_result:
+            await meshcore.commands.send_chan_msg(channel_idx, metar_result)
+            print(f"   ✅ METAR sent to channel #{channel_idx}")
+        else:
+            error_msg = f"METAR nao encontrado para {airport}"
+            await meshcore.commands.send_chan_msg(channel_idx, error_msg)
+            print(f"   ❌ {error_msg}")
+        return
+    
+    # Handle CLIMA command
+    if re.search(r'\bCLIMA\b', command_text, re.IGNORECASE):
+        print(f"🌤️  Channel #{channel_idx}: @mention CLIMA request")
+        weather_data = await fetch_weather()
+        if weather_data:
+            message = format_weather_message(weather_data)
+            if message:
+                await meshcore.commands.send_chan_msg(channel_idx, message)
+                print(f"   ✅ Weather sent to channel #{channel_idx}")
+            else:
+                await meshcore.commands.send_chan_msg(channel_idx, "Erro ao formatar mensagem de clima")
+        else:
+            await meshcore.commands.send_chan_msg(channel_idx, "Erro ao buscar dados de clima")
+        return
+
 
 async def on_rx_log(event):
     """Handle RX log events (raw LoRa packet info)."""
@@ -730,6 +781,27 @@ async def main():
     if result.type != EventType.ERROR:
         info = result.payload
         print(f"   {info.get('model', '?')} | {info.get('ver', '?')}")
+        
+        # Validate and set node name if needed
+        current_name = info.get('name', info.get('node_name', info.get('adv_name', '')))
+        if current_name:
+            print(f"   Current node name: {current_name}")
+            if current_name != MY_NODE_NAME:
+                print(f"   ⚠️  Node name differs from MY_NODE_NAME ({MY_NODE_NAME}), updating...")
+                set_name_result = await meshcore.commands.set_name(MY_NODE_NAME)
+                if set_name_result.type != EventType.ERROR:
+                    print(f"   ✅ Node name updated to: {MY_NODE_NAME}")
+                else:
+                    print(f"   ❌ Failed to update node name: {set_name_result.payload}")
+            else:
+                print(f"   ✅ Node name matches MY_NODE_NAME: {MY_NODE_NAME}")
+        else:
+            print(f"   ⚠️  Could not determine current node name, setting to: {MY_NODE_NAME}")
+            set_name_result = await meshcore.commands.set_name(MY_NODE_NAME)
+            if set_name_result.type != EventType.ERROR:
+                print(f"   ✅ Node name set to: {MY_NODE_NAME}")
+            else:
+                print(f"   ❌ Failed to set node name: {set_name_result.payload}")
 
     # Get contacts
     print("👥 Getting contacts...")

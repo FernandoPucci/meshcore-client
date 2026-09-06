@@ -19,6 +19,8 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 - **Consulta METAR via REDEMET API** - Responde a DMs com `METAR <ICAO>` (ex: `METAR SBRP`) retornando dados meteorológicos formatados
 - **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal #Public: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
 - **Envio automático de tempo/clima (cron)** - Configurável via variáveis de ambiente: envia periodicamente no canal #Public com emoji + descrição em português do tempo e fase da lua
+- **Resposta a @menções no canal #Public** - Responde a `@[NomeDoNo] METAR SBRP` e `@[NomeDoNo] CLIMA` no próprio canal
+- **Validação automática do nome do nó** - Na inicialização, verifica se o nome do nó corresponde a `MY_NODE_NAME` e atualiza se necessário
 
 ## 🔧 Requisitos
 
@@ -327,6 +329,55 @@ Clima RAO ☀️ Céu limpo
 https://api.open-meteo.com/v1/forecast?latitude=-21.1775&longitude=-47.8103&daily=moon_phase&current=is_day,temperature_2m,relative_humidity_2m,weather_code&timezone=America%2FSao_Paulo&forecast_days=1
 ```
 
+## 🤖 Resposta a @Menções no Canal #Public
+
+O bot monitora mensagens no canal #Public (e outros canais) e responde automaticamente quando é mencionado com o formato `@[NomeDoNo] COMANDO`.
+
+### Comandos suportados
+
+| Comando | Descrição | Exemplo |
+|---------|-----------|---------|
+| `METAR <ICAO>` | Consulta METAR na REDEMET | `@[MeshMonitor] METAR SBRP` |
+| `CLIMA` | Consulta tempo/clima atual | `@[MeshMonitor] CLIMA` |
+
+### Formato da menção
+
+```
+@[NomeDoNo] METAR SBRP
+@[NomeDoNo] CLIMA
+```
+
+- O nome do nó deve corresponder exatamente à variável `MY_NODE_NAME` no `.env`
+- Case-insensitive para o comando (METAR/Clima/metar/clima)
+- A resposta é enviada **no mesmo canal** onde a menção foi recebida
+- Para METAR: retorna o METAR completo com timestamp (máx. 130 chars)
+- Para CLIMA: retorna temperatura, umidade, fase da lua com descrição em português
+
+### Exemplo de interação
+
+**Usuário no #Public:**
+```
+@[MeshMonitor] METAR SBRP
+```
+
+**Resposta do bot no #Public:**
+```
+METAR SBRP 062000Z 25007KT CAVOK 34/09 Q1011= 20:00 06/09/2026
+```
+
+**Usuário no #Public:**
+```
+@[MeshMonitor] CLIMA
+```
+
+**Resposta do bot no #Public:**
+```
+Clima RAO ☀️ Céu limpo
+25°C 65%
+🌕 Lua cheia
+14:30 06/09/2026
+```
+
 ## ⌨️ Atalhos de Teclado
 
 | Tecla | Ação |
@@ -363,6 +414,9 @@ MAX_MESSAGE_LENGTH=130
 WEATHER_AUTO_SEND_ENABLED=false
 WEATHER_AUTO_SEND_INTERVAL=30
 WEATHER_AUTO_SEND_CHANNEL=0
+
+# Bot Node Name (para @menções em canais)
+MY_NODE_NAME=MeshMonitor
 ```
 
 ### Variáveis de ambiente principais
@@ -377,6 +431,7 @@ WEATHER_AUTO_SEND_CHANNEL=0
 | `WEATHER_AUTO_SEND_ENABLED` | Habilita envio automático de tempo (true/false) | `false` |
 | `WEATHER_AUTO_SEND_INTERVAL` | Intervalo em minutos para envio automático | `30` |
 | `WEATHER_AUTO_SEND_CHANNEL` | Índice do canal destino (0 = #Public) | `0` |
+| `MY_NODE_NAME` | Nome do nó para @menções em canais | `MeshMonitor` |
 
 ## 🐛 Solução de Problemas
 
