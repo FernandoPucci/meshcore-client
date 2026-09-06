@@ -440,6 +440,20 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
         return
     
     command_text = match.group(1).strip()
+    command_upper = command_text.upper()
+    
+    # Handle HELP/AJUDA command
+    if re.search(r'\b(AJUDA|HELP)\b', command_upper):
+        print(f"❓ Channel #{channel_idx}: @mention AJUDA/HELP request")
+        help_msg = (
+            f"Comandos disponiveis para @[{MY_NODE_NAME}]:\n"
+            f"  METAR <ICAO> - Consulta METAR (ex: METAR SBRP)\n"
+            f"  CLIMA - Previsao do tempo atual\n"
+            f"  AJUDA / HELP - Esta mensagem"
+        )
+        await meshcore.commands.send_chan_msg(channel_idx, help_msg)
+        print(f"   ✅ Help sent to channel #{channel_idx}")
+        return
     
     # Handle METAR command
     metar_match = re.search(r'\bMETAR\s+([A-Z0-9]{4})\b', command_text, re.IGNORECASE)
@@ -456,8 +470,16 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
             print(f"   ❌ {error_msg}")
         return
     
+    # Handle METAR without airport code
+    if re.search(r'\bMETAR\b', command_upper):
+        print(f"⚠️  Channel #{channel_idx}: @mention METAR without airport code")
+        help_msg = "Para METAR adicione o codigo ICAO: METAR <AEROPORTO> (ex: METAR SBRP)"
+        await meshcore.commands.send_chan_msg(channel_idx, help_msg)
+        print(f"   ✅ METAR help sent to channel #{channel_idx}")
+        return
+    
     # Handle CLIMA command
-    if re.search(r'\bCLIMA\b', command_text, re.IGNORECASE):
+    if re.search(r'\bCLIMA\b', command_upper):
         print(f"🌤️  Channel #{channel_idx}: @mention CLIMA request")
         weather_data = await fetch_weather()
         if weather_data:
@@ -470,6 +492,15 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
         else:
             await meshcore.commands.send_chan_msg(channel_idx, "Erro ao buscar dados de clima")
         return
+    
+    # Unrecognized command
+    print(f"❓ Channel #{channel_idx}: @mention unrecognized command: {command_text}")
+    help_msg = (
+        f"Comando nao reconhecido: {command_text}\n"
+        f"Use @[{MY_NODE_NAME}] AJUDA para ver comandos disponiveis"
+    )
+    await meshcore.commands.send_chan_msg(channel_idx, help_msg)
+    print(f"   ✅ Unrecognized command help sent to channel #{channel_idx}")
 
 
 async def on_rx_log(event):
@@ -784,22 +815,24 @@ async def main():
         
         # Validate and set node name if needed
         current_name = info.get('name', info.get('node_name', info.get('adv_name', '')))
+        # Append robot emoji to the configured name
+        desired_name = f"{MY_NODE_NAME} 🤖"
         if current_name:
             print(f"   Current node name: {current_name}")
-            if current_name != MY_NODE_NAME:
-                print(f"   ⚠️  Node name differs from MY_NODE_NAME ({MY_NODE_NAME}), updating...")
-                set_name_result = await meshcore.commands.set_name(MY_NODE_NAME)
+            if current_name != desired_name:
+                print(f"   ⚠️  Node name differs from desired ({desired_name}), updating...")
+                set_name_result = await meshcore.commands.set_name(desired_name)
                 if set_name_result.type != EventType.ERROR:
-                    print(f"   ✅ Node name updated to: {MY_NODE_NAME}")
+                    print(f"   ✅ Node name updated to: {desired_name}")
                 else:
                     print(f"   ❌ Failed to update node name: {set_name_result.payload}")
             else:
-                print(f"   ✅ Node name matches MY_NODE_NAME: {MY_NODE_NAME}")
+                print(f"   ✅ Node name matches desired: {desired_name}")
         else:
-            print(f"   ⚠️  Could not determine current node name, setting to: {MY_NODE_NAME}")
-            set_name_result = await meshcore.commands.set_name(MY_NODE_NAME)
+            print(f"   ⚠️  Could not determine current node name, setting to: {desired_name}")
+            set_name_result = await meshcore.commands.set_name(desired_name)
             if set_name_result.type != EventType.ERROR:
-                print(f"   ✅ Node name set to: {MY_NODE_NAME}")
+                print(f"   ✅ Node name set to: {desired_name}")
             else:
                 print(f"   ❌ Failed to set node name: {set_name_result.payload}")
 
