@@ -30,7 +30,19 @@
     "lon": 0,
     "type": 0,
     "tx_power": "?",
-    "last_seen": 1788484461,
+    "last_seen": 1788627871,
+    "last_rssi": "?",
+    "last_snr": "?",
+    "last_hops": "?"
+  },
+  "8269a843c3796a3e702698c6f7a05c79e592f524e8a819105e45ff9b85e0b80d": {
+    "name": "unknown",
+    "public_key": "8269a843c3796a3e702698c6f7a05c79e592f524e8a819105e45ff9b85e0b80d",
+    "lat": 0,
+    "lon": 0,
+    "type": 0,
+    "tx_power": "?",
+    "last_seen": 1788627165,
     "last_rssi": "?",
     "last_snr": "?",
     "last_hops": "?"

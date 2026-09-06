@@ -5,13 +5,15 @@ and displays all received data formatted correctly.
 - Monitors all public channels (#)
 - Captures advertisements and saves known nodes to file
 - Ctrl+A: Send advert
+- Ctrl+F: Send weather/time to #Public channel
 """
 import asyncio
 import json
+import os
 import re
 import sys
-import time
 import termios
+import time
 import tty
 import textwrap
 from datetime import datetime
@@ -22,17 +24,27 @@ import aiohttp
 from meshcore import MeshCore, EventType
 from meshcore.commands import MessagingCommands
 
-SERIAL_PORT = "/dev/ttyUSB0"
-BAUDRATE = 115200
-KNOWN_NODES_FILE = Path("known_nodes.json")
+from dotenv import load_dotenv
+
+load_dotenv()
+
+SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
+BAUDRATE = int(os.getenv("BAUDRATE", "115200"))
+KNOWN_NODES_FILE = Path(os.getenv("KNOWN_NODES_FILE", "known_nodes.json"))
 
 # Display width for boxes
-BOX_WIDTH = 72
+BOX_WIDTH = int(os.getenv("BOX_WIDTH", "72"))
 
 # METAR API Configuration
-METAR_API_KEY = "KeBTpXyYGmcJnUTysDTUkqQ69J3bzoKpnY5TQGV0"
-METAR_API_BASE = "https://api-redemet.decea.mil.br/mensagens/metar"
-MAX_MESSAGE_LENGTH = 130
+METAR_API_KEY = os.getenv("METAR_API_KEY", "")
+METAR_API_BASE = os.getenv("METAR_API_BASE", "https://api-redemet.decea.mil.br/mensagens/metar")
+
+# Open-Meteo Weather API Configuration
+OPEN_METEO_LATITUDE = float(os.getenv("OPEN_METEO_LATITUDE", "-21.1775"))
+OPEN_METEO_LONGITUDE = float(os.getenv("OPEN_METEO_LONGITUDE", "-47.8103"))
+OPEN_METEO_BASE = os.getenv("OPEN_METEO_BASE", "https://api.open-meteo.com/v1/forecast")
+
+MAX_MESSAGE_LENGTH = int(os.getenv("MAX_MESSAGE_LENGTH", "130"))
 
 
 def wrap_text(text, width=BOX_WIDTH - 4):
@@ -93,6 +105,117 @@ async def fetch_metar(airport: str) -> Optional[str]:
     except Exception as e:
         print(f"⚠️  Error fetching METAR: {e}")
         return None
+
+
+WEATHER_CODE_EMOJI = {
+    0: "☀️",
+    1: "🌤️",
+    2: "⛅",
+    3: "☁️",
+    45: "🌫️",
+    48: "🌫️",
+    51: "🌦️",
+    53: "🌧️",
+    55: "🌧️",
+    56: "🌧️",
+    57: "🌧️",
+    61: "🌦️",
+    63: "🌧️",
+    65: "🌧️",
+    66: "🌧️",
+    67: "🌧️",
+    71: "🌨️",
+    73: "🌨️",
+    75: "🌨️",
+    77: "🌨️",
+    80: "🌦️",
+    81: "🌧️",
+    82: "🌧️",
+    85: "🌨️",
+    86: "🌨️",
+    95: "⛈️",
+    96: "⛈️",
+    99: "⛈️",
+}
+
+MOON_PHASE_EMOJI = {
+    (0.000, 0.0625): "🌑",
+    (0.0625, 0.1875): "🌒",
+    (0.1875, 0.3125): "🌓",
+    (0.3125, 0.4375): "🌔",
+    (0.4375, 0.5625): "🌕",
+    (0.5625, 0.6875): "🌖",
+    (0.6875, 0.8125): "🌗",
+    (0.8125, 0.9375): "🌘",
+    (0.9375, 1.000): "🌑",
+}
+
+
+def get_moon_phase_emoji(phase: float) -> str:
+    for (start, end), emoji in MOON_PHASE_EMOJI.items():
+        if start <= phase < end:
+            return emoji
+    return "🌑"
+
+
+async def fetch_weather() -> Optional[dict]:
+    """Fetch weather data from Open-Meteo API for Ribeirao Preto."""
+    url = (
+        f"{OPEN_METEO_BASE}?"
+        f"latitude={OPEN_METEO_LATITUDE}&longitude={OPEN_METEO_LONGITUDE}"
+        f"&daily=moon_phase"
+        f"&current=is_day,temperature_2m,relative_humidity_2m,weather_code"
+        f"&timezone=America%2FSao_Paulo&forecast_days=1"
+    )
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    print(f"⚠️  Weather API error: HTTP {response.status}")
+                    return None
+                data = await response.json()
+                return data
+    except Exception as e:
+        print(f"⚠️  Error fetching weather: {e}")
+        return None
+
+
+def format_weather_message(weather_data: dict) -> Optional[str]:
+    """Format weather data into a message with one item per line, max 130 chars."""
+    if not weather_data:
+        return None
+
+    current = weather_data.get("current", {})
+    daily = weather_data.get("daily", {})
+
+    temp = current.get("temperature_2m")
+    humidity = current.get("relative_humidity_2m")
+    weather_code = current.get("weather_code")
+    is_day = current.get("is_day", 1)
+
+    moon_phase = daily.get("moon_phase", [0])[0] if daily.get("moon_phase") else 0
+
+    now = datetime.now()
+    time_str = now.strftime("%H:%M")
+    date_str = now.strftime("%d/%m/%Y")
+
+    weather_emoji = WEATHER_CODE_EMOJI.get(weather_code, "❓")
+    moon_emoji = get_moon_phase_emoji(moon_phase)
+
+    lines = [
+        f"Clima RAO {weather_emoji}",
+        f"{temp}°C {humidity}%",
+        f"{moon_emoji} {moon_phase:.2f}",
+        f"{time_str} {date_str}",
+    ]
+
+    message = "\n".join(lines)
+
+    if len(message) > MAX_MESSAGE_LENGTH:
+        message = message[:MAX_MESSAGE_LENGTH]
+
+    return message
 
 
 def parse_metar_command(text: str) -> Optional[str]:
@@ -406,8 +529,32 @@ async def send_advert_shortcut(meshcore):
         print(f"   ❌ {result.payload}")
 
 
+async def send_weather_shortcut(meshcore):
+    """Send weather/time to #Public channel on Ctrl+F."""
+    print("\n🌤️  Fetching weather (Ctrl+F)...")
+    weather_data = await fetch_weather()
+    if not weather_data:
+        print("   ❌ Failed to fetch weather")
+        return
+    
+    message = format_weather_message(weather_data)
+    if not message:
+        print("   ❌ Failed to format weather message")
+        return
+    
+    print(f"   Sending to #Public (channel 0):")
+    for line in message.split('\n'):
+        print(f"     {line}")
+    
+    result = await meshcore.commands.send_chan_msg(0, message)
+    if result.type != EventType.ERROR:
+        print("   ✅ Sent to #Public")
+    else:
+        print(f"   ❌ {result.payload}")
+
+
 async def keyboard_listener(meshcore):
-    """Listen for keyboard input (Ctrl+A)."""
+    """Listen for keyboard input (Ctrl+A, Ctrl+F)."""
     fd = sys.stdin.fileno()
     if not sys.stdin.isatty():
         # Not a TTY (e.g., piped input), just wait
@@ -421,6 +568,8 @@ async def keyboard_listener(meshcore):
             ch = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.read, 1)
             if ch == '\x01':  # Ctrl+A
                 await send_advert_shortcut(meshcore)
+            elif ch == '\x06':  # Ctrl+F
+                await send_weather_shortcut(meshcore)
             elif ch == '\x03':  # Ctrl+C
                 raise KeyboardInterrupt
             await asyncio.sleep(0.05)
@@ -518,7 +667,7 @@ async def main():
     print("\n" + "="*70)
     print("🎯 MONITORING ALL CHANNELS + ADVERTISEMENTS")
     print(f"💾 Known nodes saved to: {KNOWN_NODES_FILE}")
-    print("⌨️  Ctrl+A = Send advert  |  Ctrl+C = Exit")
+    print("⌨️  Ctrl+A = Send advert  |  Ctrl+F = Weather to #Public  |  Ctrl+C = Exit")
     print("="*70 + "\n")
 
     # Run keyboard listener alongside main loop

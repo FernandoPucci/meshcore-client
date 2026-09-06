@@ -17,6 +17,7 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
   - Eventos de sistema (bateria, telemetria, stats, etc.)
 - **Armazenamento persistente** de nós conhecidos em `known_nodes.json`
 - **Consulta METAR via REDEMET API** - Responde a DMs com `METAR <ICAO>` (ex: `METAR SBRP`) retornando dados meteorológicos formatados
+- **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal #Public: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
 
 ## 🔧 Requisitos
 
@@ -47,6 +48,7 @@ python3 meshcore_monitor.py
 
 # Atalhos:
 #   Ctrl+A = Enviar advert (anúncio de presença)
+#   Ctrl+F = Enviar tempo/clima para canal #Public
 #   Ctrl+C = Sair
 ```
 
@@ -249,24 +251,102 @@ Formato: METAR <AEROPORTO> (ex: METAR SBRP)
 
 > **Nota:** O bot **não responde em canais públicos** para não poluir a rede - apenas em DMs (mensagens privadas).
 
+## 🌤️ Tempo/Clima no Canal #Public (Ctrl+F)
+
+Ao pressionar **Ctrl+F**, o monitor consulta a API **Open-Meteo** para Ribeirão Preto e publica uma mensagem formatada no canal **#Public** (índice 0).
+
+### Formato da mensagem (um item por linha, máx. 130 chars)
+
+```
+Clima RAO ☀️
+25°C 65%
+🌕 0.52
+14:30 05/09/2026
+```
+
+### Componentes
+
+| Item | Descrição | Fonte |
+|------|-----------|-------|
+| `Clima RAO` | Prefixo fixo + emoji do tempo | `weather_code` |
+| `25°C 65%` | Temperatura + umidade relativa | `temperature_2m`, `relative_humidity_2m` |
+| `🌕 0.52` | Emoji da fase da lua + valor | `moon_phase` (daily) |
+| `14:30 05/09/2026` | Hora e data local | `datetime.now()` (timezone America/Sao_Paulo) |
+
+### Emojis de tempo (weather_code)
+
+| Código | Condição | Emoji |
+|--------|----------|-------|
+| 0 | Céu limpo | ☀️ |
+| 1-3 | Parcialmente nublado a nublado | 🌤️ ⛅ ☁️ |
+| 45, 48 | Neblina | 🌫️ |
+| 51-57 | Chuvisco | 🌦️ 🌧️ |
+| 61-67 | Chuva | 🌦️ 🌧️ |
+| 71-77 | Neve | 🌨️ |
+| 80-82 | Pancadas de chuva | 🌦️ 🌧️ |
+| 85-86 | Pancadas de neve | 🌨️ |
+| 95-99 | Tempestade | ⛈️ |
+
+### Emojis de fase da lua (moon_phase 0.0-1.0)
+
+| Fase | Intervalo | Emoji |
+|------|-----------|-------|
+| Lua Nova | 0.00-0.06, 0.50-0.56 | 🌑 |
+| Lua Crescente | 0.06-0.19, 0.56-0.69 | 🌒 🌓 |
+| Quarto Crescente | 0.19-0.25, 0.69-0.75 | 🌔 |
+| Lua Cheia | 0.25-0.31, 0.75-0.81 | 🌕 |
+| Quarto Minguante | 0.31-0.38, 0.81-0.88 | 🌖 🌗 |
+| Lua Minguante | 0.38-0.44, 0.88-0.94 | 🌘 |
+| Lua Nova (fim) | 0.94-1.00 | 🌘 |
+
+### Exemplo de chamada API
+
+```
+https://api.open-meteo.com/v1/forecast?latitude=-21.1775&longitude=-47.8103&daily=moon_phase&current=is_day,temperature_2m,relative_humidity_2m,weather_code&timezone=America%2FSao_Paulo&forecast_days=1
+```
+
 ## ⌨️ Atalhos de Teclado
 
 | Tecla | Ação |
 |-------|------|
 | **Ctrl+A** | Enviar advert (anúncio de presença) |
+| **Ctrl+F** | Enviar tempo/clima para canal #Public |
 | **Ctrl+C** | Sair do monitor |
 
-> **Nota:** Ctrl+A só funciona em terminal interativo (TTY). Em execuções não-interativas (pipes, scripts), use Ctrl+C para sair.
+> **Nota:** Ctrl+A e Ctrl+F só funcionam em terminal interativo (TTY). Em execuções não-interativas (pipes, scripts), use Ctrl+C para sair.
 
 ## ⚙️ Configuração
 
-Edite `meshcore_monitor.py` para ajustar:
+As configurações são feitas via arquivo `.env` (copie `.env.example` para `.env` e ajuste):
 
-```python
-SERIAL_PORT = "/dev/ttyUSB0"  # Porta serial do nó
-BAUDRATE = 115200              # Baud rate (padrão MeshCore)
-KNOWN_NODES_FILE = Path("known_nodes.json")  # Arquivo de nós conhecidos
+```bash
+# Configuração serial
+SERIAL_PORT=/dev/ttyUSB0
+BAUDRATE=115200
+KNOWN_NODES_FILE=known_nodes.json
+BOX_WIDTH=72
+
+# METAR API (REDEMET)
+METAR_API_KEY=sua_chave_api
+METAR_API_BASE=https://api-redemet.decea.mil.br/mensagens/metar
+
+# Open-Meteo Weather API (Ribeirão Preto)
+OPEN_METEO_LATITUDE=-21.1775
+OPEN_METEO_LONGITUDE=-47.8103
+OPEN_METEO_BASE=https://api.open-meteo.com/v1/forecast
+
+MAX_MESSAGE_LENGTH=130
 ```
+
+### Variáveis de ambiente principais
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `SERIAL_PORT` | Porta serial do nó MeshCore | `/dev/ttyUSB0` |
+| `BAUDRATE` | Baud rate da conexão | `115200` |
+| `OPEN_METEO_LATITUDE` | Latitude para consulta de tempo | `-21.1775` (Ribeirão Preto) |
+| `OPEN_METEO_LONGITUDE` | Longitude para consulta de tempo | `-47.8103` (Ribeirão Preto) |
+| `MAX_MESSAGE_LENGTH` | Tamanho máximo da mensagem MeshCore | `130` |
 
 ## 🐛 Solução de Problemas
 
