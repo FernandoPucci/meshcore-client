@@ -150,6 +150,10 @@ activemq-data/
 # Environments
 .env
 .envrc
+
+# MeshCore known nodes data
+known_nodes.json
+known*.json
 .venv
 env/
 venv/
