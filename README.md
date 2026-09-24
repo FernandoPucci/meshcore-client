@@ -25,11 +25,19 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 
 ## 🔧 Requisitos
 
+### Execução Nativa
 - Python 3.10+
 - Biblioteca `meshcore` (SDK oficial Python)
 - Permissão de acesso à porta serial (`dialout` group)
 
+### Execução com Docker (Recomendado para Raspberry Pi)
+- Docker Engine 20.10+
+- Docker Compose v2+
+- Permissão de acesso à porta serial (`dialout` group)
+
 ## 📦 Instalação
+
+### Opção 1: Execução Nativa
 
 ```bash
 # Instalar SDK MeshCore
@@ -44,7 +52,59 @@ sudo usermod -a -G dialout $USER
 # Faça logout/login após isso
 ```
 
+### Opção 2: Execução com Docker (Recomendado para Raspberry Pi)
+
+```bash
+# 1. Clonar/copiar o projeto para o Pi
+# 2. Configurar .env (copie .env.example para .env e ajuste SERIAL_PORT se necessário)
+cp .env.example .env
+# Edite .env com suas configurações (SERIAL_PORT, chaves API, etc.)
+
+# 3. Build da imagem Docker
+docker compose build
+
+# 4. Iniciar em background (reinicia automaticamente no boot)
+docker compose up -d
+
+# 5. Ver logs em tempo real
+docker compose logs -f
+
+# 6. Parar
+docker compose down
+```
+
+#### Comandos úteis Docker:
+```bash
+# Ver status do container
+docker compose ps
+
+# Reiniciar manualmente
+docker compose restart
+
+# Rebuild após alterações no código
+docker compose build --no-cache && docker compose up -d
+
+# Entrar no container para debug
+docker compose exec meshcore-monitor bash
+
+# Ver uso de recursos
+docker stats meshcore-monitor
+```
+
+> **⚠️ Importante para Raspberry Pi Zero (ARMv6):**
+> O Raspberry Pi Zero original (não Zero 2 W) usa arquitetura ARMv6, que **não é compatível** com a imagem base `python:3.11-slim-bookworm` (requer ARMv7+).
+> 
+> **Solução para Pi Zero v1:** Altere o `Dockerfile` para usar a base Debian Bullseye:
+> ```dockerfile
+> FROM python:3.11-slim-bullseye
+> ```
+> O Bullseye tem suporte a ARMv6. O Bookworm (Debian 12) removeu o suporte a ARMv6.
+> 
+> **Raspberry Pi 3, 4, 5, Zero 2 W:** Funcionam normalmente com a configuração padrão (ARMv7/ARM64).
+
 ## ▶️ Execução
+
+### Nativa
 
 ```bash
 # Executar monitor
@@ -56,7 +116,19 @@ python3 meshcore_monitor.py
 #   Ctrl+C = Sair
 ```
 
-**Nota:** O atalho Ctrl+A funciona apenas quando executado em terminal interativo (TTY).
+**Nota:** O atalho Ctrl+A funciona apenas quando executado em terminal interativo (TTY). No Docker, use `docker compose logs -f` para acompanhar a saída.
+
+### Com Docker
+```bash
+# Iniciar (já configurado para auto-restart no boot)
+docker compose up -d
+
+# Ver logs
+docker compose logs -f
+
+# Parar
+docker compose down
+```
 
 ### Envio Automático de Tempo/Clima (Cron via Variável de Ambiente)
 

@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  meshcore-monitor:
+    build: .
+    container_name: meshcore-monitor
+    restart: unless-stopped
+    env_file:
+      - .env
+    devices:
+      - "${SERIAL_PORT:-/dev/ttyUSB0}:${SERIAL_PORT:-/dev/ttyUSB0}"
+    volumes:
+      - ./known_nodes.json:/app/known_nodes.json
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
