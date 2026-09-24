@@ -19,7 +19,8 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 - **Consulta METAR via REDEMET API** - Responde a DMs com `METAR <ICAO>` (ex: `METAR SBRP`) retornando dados meteorológicos formatados
 - **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal #Public: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
 - **Envio automático de tempo/clima (cron)** - Configurável via variáveis de ambiente: envia periodicamente no canal #Public com emoji + descrição em português do tempo e fase da lua
-- **Resposta a @menções no canal #Public** - Responde a `@[NomeDoNo] METAR SBRP` e `@[NomeDoNo] CLIMA` no próprio canal
+- **Resposta a @menções no canal #Public** - Responde a `@[NomeDoNo] METAR SBRP`, `@[NomeDoNo] CLIMA` e `@[NomeDoNo] STATUS <PUBKEY>` no próprio canal
+- **Telemetria automática de repetidoras** - Verifica periodicamente a telemetria de todas as repetidoras conhecidas (tipo 2) e publica no canal configurado, ordenadas por força de sinal
 - **Validação automática do nome do nó** - Na inicialização, verifica se o nome do nó corresponde a `MY_NODE_NAME` e atualiza se necessário
 
 ## 🔧 Requisitos
@@ -73,6 +74,23 @@ WEATHER_AUTO_SEND_CHANNEL=0
 ```
 
 Ao habilitar, o sistema envia a previsão **imediatamente na inicialização** e depois a cada N minutos configurados. A mensagem inclui emoji + **descrição completa em português** do código do tempo (WMO) e fase da lua.
+
+### Envio Automático de Telemetria de Repetidoras (Cron via Variável de Ambiente)
+
+Configure as variáveis abaixo no `.env` para habilitar a verificação periódica automática de telemetria:
+
+```bash
+# Habilita verificação automática de telemetria (true/false)
+TELEMETRY_AUTO_SEND_ENABLED=true
+
+# Intervalo em minutos (padrão: 30) - use 480 para 3x/dia (8h)
+TELEMETRY_AUTO_SEND_INTERVAL=30
+
+# Índice do canal destino (padrão: 0 = #Public)
+TELEMETRY_AUTO_SEND_CHANNEL=0
+```
+
+Ao habilitar, o sistema verifica a telemetria **imediatamente na inicialização** e depois a cada N minutos. As repetidoras são consultadas ordenadas por força de sinal (RSSI/SNR mais forte primeiro), cada uma gerando uma mensagem individual no canal.
 
 ## 📊 Saída Esperada
 
@@ -341,6 +359,7 @@ O bot monitora mensagens no canal #Public (e outros canais) e responde automatic
 |---------|-----------|---------|
 | `METAR <ICAO>` | Consulta METAR na REDEMET | `@[MeshMonitor 🤖] METAR SBRP` |
 | `CLIMA` | Consulta tempo/clima atual | `@[MeshMonitor 🤖] CLIMA` |
+| `STATUS <PUBKEY>` | Telemetria da repetidora (chave 64 chars) | `@[MeshMonitor 🤖] STATUS 31898b80ada6...` |
 | `AJUDA` / `HELP` | Lista comandos disponíveis | `@[MeshMonitor 🤖] AJUDA` |
 
 ### Formato da menção
@@ -391,10 +410,10 @@ Clima RAO ☀️ Céu limpo
 
 **Resposta do bot no #Public:**
 ```
-Comandos disponiveis para @[MeshMonitor 🤖]:
-  METAR <ICAO> - Consulta METAR (ex: METAR SBRP)
-  CLIMA - Previsao do tempo atual
-  AJUDA / HELP - Esta mensagem
+Comandos @[MeshMonitor 🤖]:
+-CLIMA (clima atual em RAO)
+-METAR<ICAO> (ex: METAR SBRP)
+-STATUS<PUBKEY> (telemetria repetidora)
 ```
 
 **Usuário no #Public (METAR sem aeroporto):**
@@ -455,6 +474,17 @@ WEATHER_AUTO_SEND_ENABLED=false
 WEATHER_AUTO_SEND_INTERVAL=30
 WEATHER_AUTO_SEND_CHANNEL=0
 
+# Auto Telemetry Sending (Cron via variável de ambiente)
+TELEMETRY_AUTO_SEND_ENABLED=false
+TELEMETRY_AUTO_SEND_INTERVAL=30
+TELEMETRY_AUTO_SEND_CHANNEL=0
+
+# Repeater Telemetry Password (para login antes de requisições binárias)
+REPEATER_TELEMETRY_PASSWORD=CRRP2O26
+
+# Debug Configuration
+DEBUG_ENABLED=true
+
 # Bot Node Name (para @menções em canais)
 MY_NODE_NAME=MeshMonitor
 ```
@@ -471,6 +501,11 @@ MY_NODE_NAME=MeshMonitor
 | `WEATHER_AUTO_SEND_ENABLED` | Habilita envio automático de tempo (true/false) | `false` |
 | `WEATHER_AUTO_SEND_INTERVAL` | Intervalo em minutos para envio automático | `30` |
 | `WEATHER_AUTO_SEND_CHANNEL` | Índice do canal destino (0 = #Public) | `0` |
+| `TELEMETRY_AUTO_SEND_ENABLED` | Habilita verificação automática de telemetria (true/false) | `false` |
+| `TELEMETRY_AUTO_SEND_INTERVAL` | Intervalo em minutos para verificação de telemetria | `30` |
+| `TELEMETRY_AUTO_SEND_CHANNEL` | Índice do canal destino para telemetria (0 = #Public) | `0` |
+| `REPEATER_TELEMETRY_PASSWORD` | Senha para login em repetidoras antes de telemetria | `CRRP2O26` |
+| `DEBUG_ENABLED` | Habilita saída de debug detalhada (true/false) | `true` |
 | `MY_NODE_NAME` | Nome base do nó (emoji 🤖 adicionado automaticamente) | `MeshMonitor` |
 
 > **Nota:** O sistema adiciona automaticamente o emoji 🤖 ao nome configurado em `MY_NODE_NAME` na inicialização. Ex: `MY_NODE_NAME=MeshMonitor` → nome no dispositivo = `MeshMonitor 🤖`. Use o nome completo com emoji nas @menções.
