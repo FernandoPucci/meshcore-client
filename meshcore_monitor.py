@@ -19,6 +19,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import aiohttp
 from meshcore import MeshCore, EventType
@@ -43,6 +44,7 @@ METAR_API_BASE = os.getenv("METAR_API_BASE", "https://api-redemet.decea.mil.br/m
 OPEN_METEO_LATITUDE = float(os.getenv("OPEN_METEO_LATITUDE", "-21.1775"))
 OPEN_METEO_LONGITUDE = float(os.getenv("OPEN_METEO_LONGITUDE", "-47.8103"))
 OPEN_METEO_BASE = os.getenv("OPEN_METEO_BASE", "https://api.open-meteo.com/v1/forecast")
+WEATHER_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 MAX_MESSAGE_LENGTH = int(os.getenv("MAX_MESSAGE_LENGTH", "130"))
 
@@ -300,7 +302,7 @@ def format_weather_message(weather_data: dict) -> Optional[str]:
 
     moon_phase = daily.get("moon_phase", [0])[0] if daily.get("moon_phase") else 0
 
-    now = datetime.now()
+    now = datetime.now(WEATHER_TIMEZONE)
     time_str = now.strftime("%H:%M")
     date_str = now.strftime("%d/%m/%Y")
 
@@ -311,7 +313,7 @@ def format_weather_message(weather_data: dict) -> Optional[str]:
 
     lines = [
         f"Clima RAO {weather_emoji} {weather_desc}",
-        f"{temp}°C {humidity}%",
+        f"🌡️ {temp}°C 💧 {humidity}%",
         f"{moon_emoji} {moon_desc}",
         f"{time_str} {date_str}",
     ]
