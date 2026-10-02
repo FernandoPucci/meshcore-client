@@ -518,7 +518,7 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
         
         result = await fetch_telemetry_from_repeater(meshcore, pubkey, repeater_name)
         
-        now = datetime.now()
+        now = datetime.now(WEATHER_TIMEZONE)
         timestamp_str = now.strftime("%m-%d-%Y %H:%M:%S")
         
         if result['success']:
@@ -1196,7 +1196,7 @@ async def fetch_telemetry_from_repeater(meshcore, repeater_pubkey: str, repeater
 
 def format_telemetry_message(results: list) -> str:
     """Format telemetry results into a message for the Public channel."""
-    now = datetime.now()
+    now = datetime.now(WEATHER_TIMEZONE)
     timestamp_str = now.strftime("%m-%d-%Y %H:%M:%S")
     
     lines = [f"{timestamp_str}"]
@@ -1311,7 +1311,7 @@ async def check_all_repeaters_telemetry(meshcore, known_nodes: dict):
         result = await fetch_telemetry_from_repeater(meshcore, pubkey, name)
         
         # Generate timestamp for THIS message (time of sending)
-        now = datetime.now()
+        now = datetime.now(WEATHER_TIMEZONE)
         timestamp_str = now.strftime("%m-%d-%Y %H:%M:%S")
         
         # Send individual message per repeater (not stacked)
