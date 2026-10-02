@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::error::{Error, Result};
-use chrono::Local;
+use chrono::Utc;
+use chrono_tz::America::Sao_Paulo;
 use serde_json::Value;
 
 pub fn fetch_metar(config: &Config, airport: &str) -> Result<Option<String>> {
@@ -103,8 +104,14 @@ fn moon_description(phase: f64) -> (&'static str, &'static str) {
     }
 }
 fn date_today() -> String {
-    Local::now().format("%Y%m%d").to_string()
+    Utc::now()
+        .with_timezone(&Sao_Paulo)
+        .format("%Y%m%d")
+        .to_string()
 }
 fn date_time() -> String {
-    Local::now().format("%H:%M %d/%m/%Y").to_string()
+    Utc::now()
+        .with_timezone(&Sao_Paulo)
+        .format("%H:%M %d/%m/%Y")
+        .to_string()
 }

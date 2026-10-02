@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 - Status presentation
+
+- Remove a chave pública das mensagens de status.
+- Converte tensão da bateria para percentual nos relatórios manuais e automáticos.
+- Usa explicitamente `America/Sao_Paulo` no horário do clima.
+- Aguarda corretamente as respostas de login e telemetria do repetidor.
+
 ## 1.0.1 - Docker serial/storage fix
 
 - Trata `EBUSY` transitório do adaptador serial após o advertisement.

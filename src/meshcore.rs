@@ -68,6 +68,17 @@ pub struct Telemetry {
     pub temperature: Option<f32>,
 }
 
+impl Telemetry {
+    pub fn battery_percentage(&self) -> Option<u8> {
+        self.battery_percent.or_else(|| {
+            self.battery_mv.map(|millivolts| {
+                let percentage = (millivolts as i32 - 3300) * 100 / 900;
+                percentage.clamp(0, 100) as u8
+            })
+        })
+    }
+}
+
 pub struct MeshCoreClient {
     port: Box<dyn SerialPort>,
 }
@@ -75,7 +86,7 @@ pub struct MeshCoreClient {
 impl MeshCoreClient {
     pub fn open(path: &str, baudrate: u32) -> Result<Self> {
         let port = serialport::new(path, baudrate)
-            .timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(65))
             .open()?;
         Ok(Self { port })
     }
@@ -172,35 +183,35 @@ impl MeshCoreClient {
 
     pub fn request_telemetry(&mut self, key: &str, password: &str) -> Result<Telemetry> {
         let key_bytes = decode_key(key)?;
-        let mut login = vec![0x1a];
-        login.extend_from_slice(&key_bytes);
-        login.extend_from_slice(password.as_bytes());
-        let login_response = self.command(&login)?;
-        if login_response.first() == Some(&0x01) {
+        let authenticated = match self.login(&key_bytes, password) {
+            Ok(value) => value,
+            Err(error) if !password.is_empty() => {
+                eprintln!("login com senha configurada falhou: {error}; tentando senha vazia");
+                false
+            }
+            Err(error) => return Err(error),
+        };
+        if !authenticated && !password.is_empty() && !self.login(&key_bytes, "")? {
             return Err(Error::Protocol("login no repetidor falhou".into()));
         }
-        if login_response.first() == Some(&0x06) {
-            let login_event = self.read_frame()?;
-            if login_event.first() == Some(&0x86) || login_event.first() == Some(&0x01) {
-                return Err(Error::Protocol("login no repetidor falhou".into()));
-            }
+        if !authenticated && password.is_empty() {
+            return Err(Error::Protocol("login no repetidor falhou".into()));
         }
 
         let mut request = vec![0x32];
         request.extend_from_slice(&key_bytes);
         request.push(0x03);
-        let sent = self.command(&request)?;
-        if sent.first() != Some(&0x06) {
-            return Err(Error::Protocol("BINARY_REQ não foi aceito".into()));
+        self.send(&request)?;
+        let sent = self.wait_for_any(&[0x06], "MSG_SENT do BINARY_REQ")?;
+        if sent.len() < 10 {
+            return Err(Error::Protocol("MSG_SENT sem timeout sugerido".into()));
         }
-        for _ in 0..4 {
-            let response = self.read_frame()?;
-            if response.first() == Some(&0x8b) && response.len() > 7 {
-                return parse_lpp(&response[7..]);
-            }
-            if response.first() == Some(&0x8c) && response.len() > 6 {
-                return parse_lpp(&response[6..]);
-            }
+        let response = self.wait_for_any(&[0x8b, 0x8c], "TELEMETRY_RESPONSE")?;
+        if response.first() == Some(&0x8b) && response.len() > 7 {
+            return parse_lpp(&response[7..]);
+        }
+        if response.first() == Some(&0x8c) && response.len() > 6 {
+            return parse_lpp(&response[6..]);
         }
         Err(Error::Protocol("TELEMETRY_RESPONSE não recebido".into()))
     }
@@ -233,6 +244,35 @@ impl MeshCoreClient {
     fn command(&mut self, payload: &[u8]) -> Result<Vec<u8>> {
         self.send(payload)?;
         self.read_frame()
+    }
+
+    fn login(&mut self, key: &[u8], password: &str) -> Result<bool> {
+        let mut command = vec![0x1a];
+        command.extend_from_slice(key);
+        command.extend_from_slice(password.as_bytes());
+        self.send(&command)?;
+        self.wait_for_any(&[0x06], "MSG_SENT do login")?;
+        let response = self.wait_for_any(&[0x85, 0x86], "resposta do login")?;
+        Ok(response.first() == Some(&0x85))
+    }
+
+    fn wait_for_any(&mut self, expected: &[u8], description: &str) -> Result<Vec<u8>> {
+        for _ in 0..32 {
+            let frame = self
+                .read_frame()
+                .map_err(|error| Error::Protocol(format!("{description}: {error}")))?;
+            match frame.first().copied() {
+                Some(code) if expected.contains(&code) => return Ok(frame),
+                Some(0x01) => {
+                    return Err(Error::Protocol(format!(
+                        "{description}: MeshCore ERROR {}",
+                        frame.get(1).copied().unwrap_or_default()
+                    )))
+                }
+                _ => {}
+            }
+        }
+        Err(Error::Protocol(format!("{description} não recebido")))
     }
 
     fn send(&mut self, payload: &[u8]) -> Result<()> {
@@ -564,5 +604,33 @@ mod tests {
     #[test]
     fn parses_c_string_at_first_nul() {
         assert_eq!(fixed_string(b"Public\0stale"), "Public");
+    }
+
+    #[test]
+    fn converts_battery_voltage_to_percentage() {
+        assert_eq!(
+            Telemetry {
+                battery_mv: Some(3300),
+                ..Default::default()
+            }
+            .battery_percentage(),
+            Some(0)
+        );
+        assert_eq!(
+            Telemetry {
+                battery_mv: Some(3750),
+                ..Default::default()
+            }
+            .battery_percentage(),
+            Some(50)
+        );
+        assert_eq!(
+            Telemetry {
+                battery_mv: Some(4200),
+                ..Default::default()
+            }
+            .battery_percentage(),
+            Some(100)
+        );
     }
 }

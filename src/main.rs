@@ -43,6 +43,10 @@ fn main() -> Result<()> {
         contacts.len()
     );
 
+    if config.telemetry_enabled {
+        send_repeater_telemetry(&mut client, &config, &known_nodes)?;
+    }
+
     if config.weather_enabled {
         if let Some(message) = services::fetch_weather(&config)? {
             client.send_channel_message(config.weather_channel, &message)?;
@@ -100,12 +104,15 @@ fn main() -> Result<()> {
                         );
                         client.send_channel_message(message.channel.unwrap_or_default(), &help)?;
                     } else if let Some(key) = parse_status(&command) {
+                        let repeater_name = known_nodes
+                            .get(&key)
+                            .map(|node| node.name.as_str())
+                            .unwrap_or("Repetidora");
                         match client.request_telemetry(&key, &config.repeater_password) {
                             Ok(data) => {
                                 let battery = data
-                                    .battery_percent
+                                    .battery_percentage()
                                     .map(|v| format!("{v}%"))
-                                    .or_else(|| data.battery_mv.map(|v| format!("{v}mV")))
                                     .unwrap_or_else(|| "N/A".into());
                                 let temperature = data
                                     .temperature
@@ -113,15 +120,12 @@ fn main() -> Result<()> {
                                     .unwrap_or_else(|| "N/A".into());
                                 client.send_channel_message(
                                     message.channel.unwrap_or_default(),
-                                    &format!(
-                                        "{}\n{}\n🔋{} 🌡️{}",
-                                        key, battery, battery, temperature
-                                    ),
+                                    &format!("{}\n🔋{} 🌡️{}", repeater_name, battery, temperature),
                                 )?;
                             }
                             Err(error) => client.send_channel_message(
                                 message.channel.unwrap_or_default(),
-                                &format!("{}\n❌{}", key, error),
+                                &format!("{}\n❌{}", repeater_name, error),
                             )?,
                         }
                     } else if let Some(airport) = parse_metar(&command) {
@@ -174,18 +178,14 @@ fn send_repeater_telemetry(
         match client.request_telemetry(&node.public_key, &config.repeater_password) {
             Ok(data) => {
                 let battery = data
-                    .battery_percent
+                    .battery_percentage()
                     .map(|v| format!("{v}%"))
-                    .or_else(|| data.battery_mv.map(|v| format!("{v}mV")))
                     .unwrap_or_else(|| "N/A".into());
                 let temperature = data
                     .temperature
                     .map(|v| format!("{v:.0}C"))
                     .unwrap_or_else(|| "N/A".into());
-                let message = format!(
-                    "{}\n{}\n🔋{} 🌡️{}",
-                    node.name, node.public_key, battery, temperature
-                );
+                let message = format!("{}\n🔋{} 🌡️{}", node.name, battery, temperature);
                 client.send_channel_message(config.telemetry_channel, &message)?;
             }
             Err(error) => eprintln!("telemetria {}: {error}", node.name),

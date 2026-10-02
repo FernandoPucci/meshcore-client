@@ -1,6 +1,6 @@
 [package]
 name = "meshcore-monitor"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2021"
 
 [dependencies]
@@ -10,4 +10,5 @@ serialport = { version = "4.10", default-features = false }
 ureq = { version = "3.1", features = ["json"] }
 urlencoding = "2.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
 dotenvy = "0.15"
