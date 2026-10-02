@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - Docker serial/storage fix
+
+- Trata `EBUSY` transitório do adaptador serial após o advertisement.
+- Permite persistir `known_nodes.json` quando o arquivo é bind-mounted pelo Docker.
+- Mantém gravação atômica fora de bind mounts.
+
 ## 1.0.0 - Rust
 
 - Remove o monitor Python e as dependências Python do projeto.

@@ -1,7 +1,8 @@
 use crate::error::{Error, Result};
 use crate::storage::{KnownNode, KnownNodes};
 use serialport::SerialPort;
-use std::io::{Read, Write};
+use std::io::Write;
+use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const HOST_START: u8 = 0x3c;
@@ -109,10 +110,13 @@ impl MeshCoreClient {
     }
 
     pub fn get_contacts(&mut self) -> Result<Vec<Contact>> {
-        self.send(&[0x04])?;
+        self.send(&[0x04])
+            .map_err(|error| Error::Protocol(format!("GET_CONTACTS envio: {error}")))?;
         let mut contacts = Vec::new();
         loop {
-            let payload = self.read_frame()?;
+            let payload = self
+                .read_frame()
+                .map_err(|error| Error::Protocol(format!("GET_CONTACTS leitura: {error}")))?;
             match parse_event(payload)? {
                 Event::Contact(contact) | Event::NewContact(contact) => contacts.push(contact),
                 Event::ContactsEnd => return Ok(contacts),
@@ -238,29 +242,72 @@ impl MeshCoreClient {
         let mut frame = vec![HOST_START];
         frame.extend((payload.len() as u16).to_le_bytes());
         frame.extend_from_slice(payload);
-        self.port.write_all(&frame)?;
-        self.port.flush()?;
+        let mut offset = 0;
+        while offset < frame.len() {
+            match self.port.write(&frame[offset..]) {
+                Ok(0) => return Err(Error::Protocol("porta serial não aceitou dados".into())),
+                Ok(written) => offset += written,
+                Err(error) if retryable_io(&error) => retry_io()?,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        loop {
+            match self.port.flush() {
+                Ok(()) => break,
+                Err(error) if retryable_io(&error) => retry_io()?,
+                Err(error) => return Err(error.into()),
+            }
+        }
         Ok(())
     }
 
     fn read_frame(&mut self) -> Result<Vec<u8>> {
         let mut byte = [0u8; 1];
         loop {
-            self.port.read_exact(&mut byte)?;
+            read_retry(&mut *self.port, &mut byte)?;
             if byte[0] == DEVICE_START {
                 break;
             }
         }
         let mut size = [0u8; 2];
-        self.port.read_exact(&mut size)?;
+        read_retry(&mut *self.port, &mut size)?;
         let len = u16::from_le_bytes(size) as usize;
         if len > MAX_FRAME {
             return Err(Error::Protocol(format!("frame inválido: {len}")));
         }
         let mut payload = vec![0; len];
-        self.port.read_exact(&mut payload)?;
+        read_retry(&mut *self.port, &mut payload)?;
         Ok(payload)
     }
+}
+
+fn retryable_io(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::Interrupted | std::io::ErrorKind::WouldBlock
+    ) || error.raw_os_error() == Some(16)
+}
+
+fn retry_io() -> Result<()> {
+    sleep(Duration::from_millis(100));
+    Ok(())
+}
+
+fn read_retry(port: &mut dyn SerialPort, buffer: &mut [u8]) -> Result<()> {
+    let mut offset = 0;
+    while offset < buffer.len() {
+        match port.read(&mut buffer[offset..]) {
+            Ok(0) => {
+                return Err(Error::Protocol(
+                    "porta serial fechada durante leitura".into(),
+                ))
+            }
+            Ok(read) => offset += read,
+            Err(error) if retryable_io(&error) => retry_io()?,
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
 }
 
 pub fn parse_device_info(data: &[u8]) -> Result<DeviceInfo> {

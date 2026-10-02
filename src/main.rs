@@ -32,6 +32,7 @@ fn main() -> Result<()> {
     }
     client.send_advert()?;
     println!("Advert enviado");
+    std::thread::sleep(Duration::from_millis(500));
     let contacts = client.get_contacts()?;
     for contact in &contacts {
         update_known_node(&mut known_nodes, contact);
