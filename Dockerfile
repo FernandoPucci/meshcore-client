@@ -1,18 +1,15 @@
-FROM python:3.11-slim-bookworm
+FROM rust:1.99-bookworm AS builder
+
+WORKDIR /src
+COPY Cargo.toml Cargo.lock .
+COPY src ./src
+COPY examples ./examples
+RUN cargo build --release --bin meshcore-monitor
+
+FROM debian:bookworm-slim
 
 WORKDIR /app
+COPY --from=builder /src/target/release/meshcore-monitor /app/meshcore-monitor
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libudev1 \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY meshcore_monitor.py .
-COPY known_nodes.json .
-COPY .env.example .
-
-ENV PYTHONUNBUFFERED=1
-
-CMD ["python3", "meshcore_monitor.py"]
+ENV RUST_BACKTRACE=1
+CMD ["/app/meshcore-monitor"]

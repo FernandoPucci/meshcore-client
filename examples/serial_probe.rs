@@ -32,7 +32,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if discarded > 0 {
         println!("Bytes descartados antes do frame: {discarded}");
     }
-    println!("Payload recebido ({} bytes): {}", payload.len(), hex(&payload));
+    println!(
+        "Payload recebido ({} bytes): {}",
+        payload.len(),
+        hex(&payload)
+    );
 
     match payload.first().copied() {
         Some(DEVICE_INFO_RESPONSE) => print_device_info(&payload)?,

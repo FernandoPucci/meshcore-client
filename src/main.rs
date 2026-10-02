@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     );
 
     for index in 0..info.max_channels.min(40) {
-        if let Some((name, _secret)) = client.get_channel(index as u8)? {
+        if let Some((name, _secret)) = client.get_channel(index)? {
             if !name.is_empty() {
                 println!("Canal [{index}] {name}");
             }

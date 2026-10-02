@@ -134,7 +134,7 @@ impl MeshCoreClient {
         let mut cmd = vec![0x09];
         cmd.extend_from_slice(&decode_key(&contact.public_key)?);
         cmd.extend([contact.node_type, contact.flags, 0xff]);
-        cmd.extend(std::iter::repeat(0).take(64));
+        cmd.extend(std::iter::repeat_n(0, 64));
         let mut name = [0u8; 32];
         let bytes = contact.name.as_bytes();
         name[..bytes.len().min(32)].copy_from_slice(&bytes[..bytes.len().min(32)]);
