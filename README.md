@@ -7,20 +7,20 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 - **Conexão serial** com nó MeshCore Companion (porta `/dev/ttyUSB0` @ 115200 baud)
 - **Informações do dispositivo**: modelo, firmware, configuração de rádio (frequência, SF, BW, CR)
 - **Lista de contatos** com nomes, tipos (CONTACT/REPEATER/ROOM), chaves públicas e localização
-- **Canais configurados** (ex: canal 0 "Public")
+- **Canal privado obrigatório** `RAO_MESHCORE`, localizado pelo nome e pela chave gravada no dispositivo
 - **Envio de advert** (anúncio de presença) na inicialização
 - **Monitoramento em tempo real** de:
   - Mensagens de contato (DMs)
-  - Mensagens de **TODOS os canais** (grupo) - não apenas Public
+  - Mensagens somente do canal privado configurado
   - Pacotes LoRa brutos (RX_LOG) com RSSI, SNR, tipo de rota, path
   - **Advertisements (anúncios)** com captura automática de dados do anunciante
   - Eventos de sistema (bateria, telemetria, stats, etc.)
 - **Armazenamento persistente** de nós conhecidos em `known_nodes.json`
 - **Consulta METAR via REDEMET API** - Responde a DMs com `METAR <ICAO>` (ex: `METAR SBRP`) retornando dados meteorológicos formatados
-- **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal #Public: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
-- **Envio automático de tempo/clima (cron)** - Configurável via variáveis de ambiente: envia periodicamente no canal #Public com emoji + descrição em português do tempo e fase da lua
-- **Resposta a @menções no canal #Public** - Responde a `@[NomeDoNo] METAR SBRP`, `@[NomeDoNo] CLIMA` e `@[NomeDoNo] STATUS <PUBKEY>` no próprio canal
-- **Telemetria automática de repetidoras** - Verifica periodicamente a telemetria de todas as repetidoras conhecidas (tipo 2) e publica no canal configurado, ordenadas por força de sinal
+- **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal privado: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
+- **Envio automático de tempo/clima (cron)** - Configurável via variáveis de ambiente: envia periodicamente no canal privado com emoji + descrição em português do tempo e fase da lua
+- **Resposta a @menções no canal privado** - Responde a `@[NomeDoNo] METAR SBRP`, `@[NomeDoNo] CLIMA` e `@[NomeDoNo] STATUS <PUBKEY>` no próprio canal
+- **Telemetria automática de repetidoras** - Verifica periodicamente a telemetria de todas as repetidoras conhecidas (tipo 2) e publica no `RAO_MESHCORE`, ordenadas por força de sinal
 - **Validação automática do nome do nó** - Na inicialização, verifica se o nome do nó corresponde a `MY_NODE_NAME` e atualiza se necessário
 
 ## 🔧 Requisitos
@@ -112,7 +112,7 @@ python3 meshcore_monitor.py
 
 # Atalhos:
 #   Ctrl+A = Enviar advert (anúncio de presença)
-#   Ctrl+F = Enviar tempo/clima para canal #Public
+#   Ctrl+F = Enviar tempo/clima para canal RAO_MESHCORE
 #   Ctrl+C = Sair
 ```
 
@@ -141,8 +141,7 @@ WEATHER_AUTO_SEND_ENABLED=true
 # Intervalo em minutos (padrão: 30)
 WEATHER_AUTO_SEND_INTERVAL=30
 
-# Índice do canal destino (padrão: 0 = #Public)
-WEATHER_AUTO_SEND_CHANNEL=0
+# O destino é sempre MESHCORE_CHANNEL_NAME
 ```
 
 Ao habilitar, o sistema envia a previsão **imediatamente na inicialização** e depois a cada N minutos configurados. A mensagem inclui emoji + **descrição completa em português** do código do tempo (WMO) e fase da lua.
@@ -158,8 +157,7 @@ TELEMETRY_AUTO_SEND_ENABLED=true
 # Intervalo em minutos (padrão: 30) - use 480 para 3x/dia (8h)
 TELEMETRY_AUTO_SEND_INTERVAL=30
 
-# Índice do canal destino (padrão: 0 = #Public)
-TELEMETRY_AUTO_SEND_CHANNEL=0
+# O destino é sempre MESHCORE_CHANNEL_NAME
 ```
 
 Ao habilitar, o sistema verifica a telemetria **imediatamente na inicialização** e depois a cada N minutos. As repetidoras são consultadas ordenadas por força de sinal (RSSI/SNR mais forte primeiro), cada uma gerando uma mensagem individual no canal.
@@ -200,8 +198,8 @@ Ao habilitar, o sistema verifica a telemetria **imediatamente na inicialização
   ...
 ======================================================================
 
-📺 Getting channels...
-  [0] Public (hash=11) role=MEMBER
+📺 Looking for private channel 'RAO_MESHCORE'...
+   ✅ Using RAO_MESHCORE at channel index <discovered>
 
 📢 Sending advert...
    ✅ Sent
@@ -210,7 +208,7 @@ Ao habilitar, o sistema verifica a telemetria **imediatamente na inicialização
 📚 Loaded 15 known nodes from known_nodes.json
 
 ======================================================================
-🎯 MONITORING ALL CHANNELS + ADVERTISEMENTS
+🎯 MONITORING RAO_MESHCORE + ADVERTISEMENTS
 💾 Known nodes saved to: known_nodes.json
 ======================================================================
 ```
@@ -303,7 +301,7 @@ O monitor cria/atualiza automaticamente o arquivo `known_nodes.json` com todos o
 
 | Evento | Descrição |
 |--------|-----------|
-| `CHANNEL_MSG_RECV` | Mensagens em **todos os canais/grupos** (não só Public) |
+| `CHANNEL_MSG_RECV` | Mensagens somente do canal privado configurado |
 | `CONTACT_MSG_RECV` | Mensagens diretas entre contatos (DMs) |
 | `RX_LOG_DATA` | Pacotes LoRa recebidos com metadados RF |
 | `LOG_DATA` | Logs de transmissão |
@@ -359,11 +357,13 @@ METAR nao encontrado para SBRP
 Formato: METAR <AEROPORTO> (ex: METAR SBRP)
 ```
 
-> **Nota:** O bot **não responde em canais públicos** para não poluir a rede - apenas em DMs (mensagens privadas).
+> **Nota:** O bot responde no canal privado `RAO_MESHCORE` e também pode responder a comandos recebidos por DMs.
 
-## 🌤️ Tempo/Clima no Canal #Public (Ctrl+F e Automático)
+## 🌤️ Tempo/Clima no Canal RAO_MESHCORE (Ctrl+F e Automático)
 
-Ao pressionar **Ctrl+F**, ou automaticamente via cron (se habilitado), o monitor consulta a API **Open-Meteo** para Ribeirão Preto e publica uma mensagem formatada no canal **#Public** (índice 0, configurável).
+Ao pressionar **Ctrl+F**, ou automaticamente via cron (se habilitado), o monitor consulta a API **Open-Meteo** para Ribeirão Preto e publica uma mensagem formatada no canal privado **RAO_MESHCORE**. O índice é descoberto no dispositivo pelo nome e pela chave do canal.
+
+O monitor não processa nem responde mensagens de outros canais. A API do Companion ainda entrega mensagens pendentes de forma geral; o filtro é aplicado antes do processamento da aplicação.
 
 ### Formato da mensagem (um item por linha, máx. 130 chars)
 
@@ -419,9 +419,9 @@ Clima RAO ☀️ Céu limpo
 https://api.open-meteo.com/v1/forecast?latitude=-21.1775&longitude=-47.8103&daily=moon_phase&current=is_day,temperature_2m,relative_humidity_2m,weather_code&timezone=America%2FSao_Paulo&forecast_days=1
 ```
 
-## 🤖 Resposta a @Menções no Canal #Public
+## 🤖 Resposta a @Menções no Canal RAO_MESHCORE
 
-O bot monitora mensagens no canal #Public (e outros canais) e responde automaticamente quando é mencionado com o formato `@[NomeDoNo] COMANDO`.
+O bot monitora somente mensagens no canal privado `RAO_MESHCORE` e responde automaticamente quando é mencionado com o formato `@[NomeDoNo] COMANDO`.
 
 **Nota:** O nome do nó no dispositivo inclui automaticamente o emoji 🤖 (ex: `MeshMonitor 🤖`). A menção deve usar o nome completo com emoji.
 
@@ -452,22 +452,22 @@ O bot monitora mensagens no canal #Public (e outros canais) e responde automatic
 
 ### Exemplo de interação
 
-**Usuário no #Public:**
+**Usuário no RAO_MESHCORE:**
 ```
 @[MeshMonitor 🤖] METAR SBRP
 ```
 
-**Resposta do bot no #Public:**
+**Resposta do bot no RAO_MESHCORE:**
 ```
 METAR SBRP 062000Z 25007KT CAVOK 34/09 Q1011= 20:00 06/09/2026
 ```
 
-**Usuário no #Public:**
+**Usuário no RAO_MESHCORE:**
 ```
 @[MeshMonitor 🤖] CLIMA
 ```
 
-**Resposta do bot no #Public:**
+**Resposta do bot no RAO_MESHCORE:**
 ```
 Clima RAO ☀️ Céu limpo
 25°C 65%
@@ -475,12 +475,12 @@ Clima RAO ☀️ Céu limpo
 14:30 06/09/2026
 ```
 
-**Usuário no #Public:**
+**Usuário no RAO_MESHCORE:**
 ```
 @[MeshMonitor 🤖] AJUDA
 ```
 
-**Resposta do bot no #Public:**
+**Resposta do bot no RAO_MESHCORE:**
 ```
 Comandos @[MeshMonitor 🤖]:
 -CLIMA (clima atual em RAO)
@@ -488,22 +488,22 @@ Comandos @[MeshMonitor 🤖]:
 -STATUS<PUBKEY> (telemetria repetidora)
 ```
 
-**Usuário no #Public (METAR sem aeroporto):**
+**Usuário no RAO_MESHCORE (METAR sem aeroporto):**
 ```
 @[MeshMonitor 🤖] METAR
 ```
 
-**Resposta do bot no #Public:**
+**Resposta do bot no RAO_MESHCORE:**
 ```
 Para METAR adicione o codigo ICAO: METAR <AEROPORTO> (ex: METAR SBRP)
 ```
 
-**Usuário no #Public (comando inválido):**
+**Usuário no RAO_MESHCORE (comando inválido):**
 ```
 @[MeshMonitor 🤖] INVALIDO
 ```
 
-**Resposta do bot no #Public:**
+**Resposta do bot no RAO_MESHCORE:**
 ```
 Comando nao reconhecido: INVALIDO
 Use @[MeshMonitor 🤖] AJUDA para ver comandos disponiveis
@@ -514,7 +514,7 @@ Use @[MeshMonitor 🤖] AJUDA para ver comandos disponiveis
 | Tecla | Ação |
 |-------|------|
 | **Ctrl+A** | Enviar advert (anúncio de presença) |
-| **Ctrl+F** | Enviar tempo/clima para canal #Public |
+| **Ctrl+F** | Enviar tempo/clima para canal RAO_MESHCORE |
 | **Ctrl+C** | Sair do monitor |
 
 > **Nota:** Ctrl+A e Ctrl+F só funcionam em terminal interativo (TTY). Em execuções não-interativas (pipes, scripts), use Ctrl+C para sair.
@@ -541,15 +541,19 @@ OPEN_METEO_BASE=https://api.open-meteo.com/v1/forecast
 
 MAX_MESSAGE_LENGTH=130
 
+# Canal MeshCore privado obrigatório (já gravado no dispositivo)
+MESHCORE_CHANNEL_NAME=RAO_MESHCORE
+MESHCORE_CHANNEL_KEY=chave_hexadecimal_de_32_caracteres
+
 # Auto Weather Sending (Cron via variável de ambiente)
 WEATHER_AUTO_SEND_ENABLED=false
 WEATHER_AUTO_SEND_INTERVAL=30
-WEATHER_AUTO_SEND_CHANNEL=0
+# O destino é sempre MESHCORE_CHANNEL_NAME
 
 # Auto Telemetry Sending (Cron via variável de ambiente)
 TELEMETRY_AUTO_SEND_ENABLED=false
 TELEMETRY_AUTO_SEND_INTERVAL=30
-TELEMETRY_AUTO_SEND_CHANNEL=0
+# O destino é sempre MESHCORE_CHANNEL_NAME
 
 # Repeater Telemetry Password (para login antes de requisições binárias)
 REPEATER_TELEMETRY_PASSWORD=CRRP2O26
@@ -570,12 +574,12 @@ MY_NODE_NAME=MeshMonitor
 | `OPEN_METEO_LATITUDE` | Latitude para consulta de tempo | `-21.1775` (Ribeirão Preto) |
 | `OPEN_METEO_LONGITUDE` | Longitude para consulta de tempo | `-47.8103` (Ribeirão Preto) |
 | `MAX_MESSAGE_LENGTH` | Tamanho máximo da mensagem MeshCore | `130` |
+| `MESHCORE_CHANNEL_NAME` | Nome exato do canal privado gravado no dispositivo | `RAO_MESHCORE` |
+| `MESHCORE_CHANNEL_KEY` | Chave secreta do canal em 32 caracteres hexadecimais | obrigatório |
 | `WEATHER_AUTO_SEND_ENABLED` | Habilita envio automático de tempo (true/false) | `false` |
 | `WEATHER_AUTO_SEND_INTERVAL` | Intervalo em minutos para envio automático | `30` |
-| `WEATHER_AUTO_SEND_CHANNEL` | Índice do canal destino (0 = #Public) | `0` |
 | `TELEMETRY_AUTO_SEND_ENABLED` | Habilita verificação automática de telemetria (true/false) | `false` |
 | `TELEMETRY_AUTO_SEND_INTERVAL` | Intervalo em minutos para verificação de telemetria | `30` |
-| `TELEMETRY_AUTO_SEND_CHANNEL` | Índice do canal destino para telemetria (0 = #Public) | `0` |
 | `REPEATER_TELEMETRY_PASSWORD` | Senha para login em repetidoras antes de telemetria | `CRRP2O26` |
 | `DEBUG_ENABLED` | Habilita saída de debug detalhada (true/false) | `true` |
 | `MY_NODE_NAME` | Nome base do nó (emoji 🤖 adicionado automaticamente) | `MeshMonitor` |

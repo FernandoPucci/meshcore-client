@@ -2,10 +2,10 @@
 """
 MeshCore Monitor - Connects to a MeshCore companion node via serial
 and displays all received data formatted correctly.
-- Monitors all public channels (#)
+- Monitors the configured private channel
 - Captures advertisements and saves known nodes to file
 - Ctrl+A: Send advert
-- Ctrl+F: Send weather/time to #Public channel
+- Ctrl+F: Send weather/time to the configured private channel
 """
 import asyncio
 import json
@@ -48,10 +48,13 @@ WEATHER_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 MAX_MESSAGE_LENGTH = int(os.getenv("MAX_MESSAGE_LENGTH", "130"))
 
+# Private channel configuration
+MESHCORE_CHANNEL_NAME = os.getenv("MESHCORE_CHANNEL_NAME", "RAO_MESHCORE").strip()
+MESHCORE_CHANNEL_KEY_HEX = os.getenv("MESHCORE_CHANNEL_KEY", "").strip()
+
 # Auto Weather Sending Configuration
 WEATHER_AUTO_SEND_ENABLED = os.getenv("WEATHER_AUTO_SEND_ENABLED", "false").lower() == "true"
 WEATHER_AUTO_SEND_INTERVAL = int(os.getenv("WEATHER_AUTO_SEND_INTERVAL", "30"))
-WEATHER_AUTO_SEND_CHANNEL = int(os.getenv("WEATHER_AUTO_SEND_CHANNEL", "0"))
 
 # Bot Node Name Configuration (for @mentions in channels)
 MY_NODE_NAME = os.getenv("MY_NODE_NAME", "MeshMonitor")
@@ -59,7 +62,6 @@ MY_NODE_NAME = os.getenv("MY_NODE_NAME", "MeshMonitor")
 # Auto Telemetry Sending Configuration
 TELEMETRY_AUTO_SEND_ENABLED = os.getenv("TELEMETRY_AUTO_SEND_ENABLED", "false").lower() == "true"
 TELEMETRY_AUTO_SEND_INTERVAL = int(os.getenv("TELEMETRY_AUTO_SEND_INTERVAL", "60"))
-TELEMETRY_AUTO_SEND_CHANNEL = int(os.getenv("TELEMETRY_AUTO_SEND_CHANNEL", "0"))
 
 # Repeater Telemetry Password (for login before binary requests)
 REPEATER_TELEMETRY_PASSWORD = os.getenv("REPEATER_TELEMETRY_PASSWORD", "CRRP2O26")
@@ -411,6 +413,60 @@ def format_channel(channel):
     return f"  [{idx}] {name} (hash={chash}) role={role_names.get(role, role)}"
 
 
+def parse_channel_key(channel_key_hex: str) -> bytes:
+    """Parse and validate a MeshCore channel secret from hexadecimal text."""
+    if not re.fullmatch(r"[0-9a-fA-F]{32}", channel_key_hex):
+        raise ValueError("MESHCORE_CHANNEL_KEY must contain exactly 32 hexadecimal characters")
+    return bytes.fromhex(channel_key_hex)
+
+
+async def resolve_configured_channel(meshcore, max_channels: int = 40) -> int:
+    """Find the exact configured private channel on the connected device."""
+    if not MESHCORE_CHANNEL_NAME:
+        raise RuntimeError("MESHCORE_CHANNEL_NAME cannot be empty")
+
+    try:
+        expected_secret = parse_channel_key(MESHCORE_CHANNEL_KEY_HEX)
+    except ValueError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    try:
+        channel_count = max(1, min(int(max_channels), 255))
+    except (TypeError, ValueError):
+        channel_count = 40
+
+    matches = []
+    for channel_idx in range(channel_count):
+        result = await meshcore.commands.get_channel(channel_idx)
+        if result.type == EventType.ERROR or not isinstance(result.payload, dict):
+            continue
+
+        channel = result.payload
+        channel_name = str(channel.get("channel_name", channel.get("name", ""))).strip()
+        channel_secret = channel.get("channel_secret")
+        if isinstance(channel_secret, str):
+            try:
+                channel_secret = bytes.fromhex(channel_secret)
+            except ValueError:
+                channel_secret = None
+        elif isinstance(channel_secret, bytearray):
+            channel_secret = bytes(channel_secret)
+
+        if channel_name == MESHCORE_CHANNEL_NAME and channel_secret == expected_secret:
+            matches.append(channel_idx)
+
+    if not matches:
+        raise RuntimeError(
+            f"Configured channel {MESHCORE_CHANNEL_NAME!r} with the expected key was not found on the device"
+        )
+    if len(matches) > 1:
+        raise RuntimeError(
+            f"Configured channel {MESHCORE_CHANNEL_NAME!r} is ambiguous on the device: indexes {matches}"
+        )
+
+    return matches[0]
+
+
 def _print_lines(lines):
     """Print lines with explicit flush to avoid terminal rendering issues."""
     out = '\r\n'.join(lines) + '\r\n'
@@ -454,10 +510,13 @@ async def on_contact_message(event, meshcore=None):
         await handle_metar_request(meshcore, event, text, is_channel=False, sender_pubkey=sender_pubkey)
 
 
-async def on_channel_message(event, meshcore=None):
-    """Handle incoming channel messages (all channels)."""
+async def on_channel_message(event, meshcore=None, allowed_channel_idx: Optional[int] = None):
+    """Handle incoming messages only from the configured private channel."""
     msg = event.payload or {}
     channel_idx = msg.get('channel_idx', '?')
+    if allowed_channel_idx is not None and channel_idx != allowed_channel_idx:
+        return
+
     text = msg.get('text', '')
     lines = [
         f"\n{'='*BOX_WIDTH}",
@@ -509,7 +568,7 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
     if status_match:
         pubkey = status_match.group(1).lower()
         print(f"📡 Channel #{channel_idx}: @mention STATUS request for {pubkey[:12]}...")
-        
+
         # Ensure contact exists in node's database for telemetry query
         # Get name from known_nodes if available
         known_nodes = load_known_nodes()
@@ -861,8 +920,8 @@ async def clear_hardware_contacts(meshcore):
     print("   ✅ Hardware contact list cleared")
 
 
-async def send_weather_shortcut(meshcore):
-    """Send weather/time to #Public channel on Ctrl+F."""
+async def send_weather_shortcut(meshcore, channel_idx: int):
+    """Send weather/time to the configured private channel on Ctrl+F."""
     print("\n🌤️  Fetching weather (Ctrl+F)...")
     weather_data = await fetch_weather()
     if not weather_data:
@@ -874,13 +933,13 @@ async def send_weather_shortcut(meshcore):
         print("   ❌ Failed to format weather message")
         return
     
-    print(f"   Sending to #Public (channel 0):")
+    print(f"   Sending to {MESHCORE_CHANNEL_NAME} (channel {channel_idx}):")
     for line in message.split('\n'):
         print(f"     {line}")
     
-    result = await meshcore.commands.send_chan_msg(0, message)
+    result = await meshcore.commands.send_chan_msg(channel_idx, message)
     if result.type != EventType.ERROR:
-        print("   ✅ Sent to #Public")
+        print(f"   ✅ Sent to {MESHCORE_CHANNEL_NAME}")
     else:
         print(f"   ❌ {result.payload}")
 
@@ -904,14 +963,12 @@ async def send_weather_to_channel(meshcore, channel_idx: int):
         print(f"   ❌ Auto weather send failed: {result.payload}")
 
 
-async def auto_weather_sender(meshcore):
+async def auto_weather_sender(meshcore, channel_idx: int):
     """Background task to periodically send weather to channel."""
     if not WEATHER_AUTO_SEND_ENABLED:
         return
     
     interval_seconds = WEATHER_AUTO_SEND_INTERVAL * 60
-    channel_idx = WEATHER_AUTO_SEND_CHANNEL
-    
     print(f"🌤️  Auto weather sending enabled: every {WEATHER_AUTO_SEND_INTERVAL} min to channel #{channel_idx}")
     
     # Wait for first interval, then send periodically
@@ -1195,7 +1252,7 @@ async def fetch_telemetry_from_repeater(meshcore, repeater_pubkey: str, repeater
 
 
 def format_telemetry_message(results: list) -> str:
-    """Format telemetry results into a message for the Public channel."""
+    """Format telemetry results into a channel message."""
     now = datetime.now(WEATHER_TIMEZONE)
     timestamp_str = now.strftime("%m-%d-%Y %H:%M:%S")
     
@@ -1279,7 +1336,7 @@ def _get_signal_strength(node: dict) -> tuple:
         return (999, 999, -last_seen)
 
 
-async def check_all_repeaters_telemetry(meshcore, known_nodes: dict):
+async def check_all_repeaters_telemetry(meshcore, known_nodes: dict, channel_idx: int):
     """Check telemetry for all known repeaters (type 2), strongest signal first."""
     # Filter repeaters (type 2)
     repeaters = {
@@ -1335,7 +1392,7 @@ async def check_all_repeaters_telemetry(meshcore, known_nodes: dict):
             error = result.get('error', 'n/a')
             msg = f"{timestamp_str}\r\n{name}\r\n❌{error}"
         
-        await send_telemetry_to_channel(meshcore, TELEMETRY_AUTO_SEND_CHANNEL, msg)
+        await send_telemetry_to_channel(meshcore, channel_idx, msg)
         
         # Small delay between requests to avoid overwhelming the network
         if idx < total:
@@ -1344,14 +1401,12 @@ async def check_all_repeaters_telemetry(meshcore, known_nodes: dict):
     print(f"✅ Telemetry check complete for {total} repeater(s)")
 
 
-async def auto_telemetry_sender(meshcore):
+async def auto_telemetry_sender(meshcore, channel_idx: int):
     """Background task to periodically check telemetry of all known repeaters."""
     if not TELEMETRY_AUTO_SEND_ENABLED:
         return
     
     interval_seconds = TELEMETRY_AUTO_SEND_INTERVAL * 60
-    channel_idx = TELEMETRY_AUTO_SEND_CHANNEL
-    
     print(f"📡 Auto telemetry checking enabled: every {TELEMETRY_AUTO_SEND_INTERVAL} min to channel #{channel_idx}")
     
     # Wait for first interval, then check periodically
@@ -1359,10 +1414,10 @@ async def auto_telemetry_sender(meshcore):
         await asyncio.sleep(interval_seconds)
         # Reload known nodes in case new repeaters were discovered
         known_nodes = load_known_nodes()
-        await check_all_repeaters_telemetry(meshcore, known_nodes)
+        await check_all_repeaters_telemetry(meshcore, known_nodes, channel_idx)
 
 
-async def keyboard_listener(meshcore):
+async def keyboard_listener(meshcore, channel_idx: int):
     """Listen for keyboard input (Ctrl+A, Ctrl+F)."""
     fd = sys.stdin.fileno()
     if not sys.stdin.isatty():
@@ -1378,7 +1433,7 @@ async def keyboard_listener(meshcore):
             if ch == '\x01':  # Ctrl+A
                 await send_advert_shortcut(meshcore)
             elif ch == '\x06':  # Ctrl+F
-                await send_weather_shortcut(meshcore)
+                await send_weather_shortcut(meshcore, channel_idx)
             elif ch == '\x03':  # Ctrl+C
                 raise KeyboardInterrupt
             await asyncio.sleep(0.05)
@@ -1397,65 +1452,15 @@ async def main():
         print("❌ Failed to connect after retries")
         sys.exit(1)
 
-    # Advertisement handlers with known_nodes reference
-    async def advert_handler(e):
-        await on_advertisement(e, known_nodes)
-    
-    async def new_contact_handler(e):
-        await on_new_contact(e, known_nodes)
-    
-    async def next_contact_handler(e):
-        await on_next_contact(e, known_nodes)
-    
-    async def advert_path_handler(e):
-        await on_advert_path(e, known_nodes)
-    
-    async def channel_msg_handler(e):
-        await on_channel_message(e, meshcore)
-    
-    async def contact_msg_handler(e):
-        await on_contact_message(e, meshcore)
-    
-    # Subscribe to events
-    # Contact list handler with known_nodes reference
-    async def contact_list_handler(e):
-        await on_contact_list(e, known_nodes)
-    
-    subscriptions = [
-        meshcore.subscribe(EventType.CONTACT_MSG_RECV, contact_msg_handler),
-        meshcore.subscribe(EventType.CHANNEL_MSG_RECV, channel_msg_handler),
-        meshcore.subscribe(EventType.RX_LOG_DATA, on_rx_log),
-        meshcore.subscribe(EventType.LOG_DATA, on_log_data),
-        meshcore.subscribe(EventType.DEVICE_INFO, on_node_info),
-        meshcore.subscribe(EventType.CONTACTS, contact_list_handler),
-        meshcore.subscribe(EventType.SELF_INFO, on_self_info),
-        
-        # Advertisement handlers with known_nodes reference
-        meshcore.subscribe(EventType.ADVERTISEMENT, advert_handler),
-        meshcore.subscribe(EventType.NEW_CONTACT, new_contact_handler),
-        meshcore.subscribe(EventType.NEXT_CONTACT, next_contact_handler),
-        meshcore.subscribe(EventType.ADVERT_PATH, advert_path_handler),
-        
-        meshcore.subscribe(EventType.CONTACT_DELETED, on_generic_event),
-        meshcore.subscribe(EventType.CONTACTS_FULL, on_generic_event),
-        meshcore.subscribe(EventType.MSG_SENT, on_generic_event),
-        meshcore.subscribe(EventType.ACK, on_generic_event),
-        meshcore.subscribe(EventType.ERROR, on_generic_event),
-        meshcore.subscribe(EventType.PATH_UPDATE, on_generic_event),
-        meshcore.subscribe(EventType.TELEMETRY_RESPONSE, on_generic_event),
-        meshcore.subscribe(EventType.BATTERY, on_generic_event),
-        meshcore.subscribe(EventType.STATS_CORE, on_generic_event),
-        meshcore.subscribe(EventType.STATS_RADIO, on_generic_event),
-        meshcore.subscribe(EventType.STATS_PACKETS, on_generic_event),
-    ]
-
     # Quick initial queries
     print("\n📋 Getting device info...")
+    max_channels = 40
     result = await meshcore.commands.send_device_query()
-    if result.type != EventType.ERROR:
+    if result.type != EventType.ERROR and isinstance(result.payload, dict):
         info = result.payload
         print(f"   {info.get('model', '?')} | {info.get('ver', '?')}")
-        
+        max_channels = info.get('max_channels', max_channels)
+
         # Validate and set node name if needed
         current_name = info.get('name', info.get('node_name', info.get('adv_name', '')))
         # Append robot emoji to the configured name
@@ -1479,25 +1484,73 @@ async def main():
             else:
                 print(f"   ❌ Failed to set node name: {set_name_result.payload}")
 
-    # Clear hardware contacts first (start fresh this session)
+    # Resolve the exact channel before subscribing or fetching any messages.
+    print(f"📺 Looking for private channel {MESHCORE_CHANNEL_NAME!r}...")
+    try:
+        rao_channel_idx = await resolve_configured_channel(meshcore, max_channels)
+    except RuntimeError as exc:
+        print(f"❌ {exc}")
+        await meshcore.disconnect()
+        sys.exit(1)
+    print(f"   ✅ Using {MESHCORE_CHANNEL_NAME} at channel index {rao_channel_idx}")
+
+    # Clear hardware contacts only after the required channel was validated.
     await clear_hardware_contacts(meshcore)
 
     # Get contacts (now should be empty)
     print("👥 Getting contacts...")
     await meshcore.commands.get_contacts()
 
-    # Get channels
-    print("📺 Getting channels...")
-    for idx in range(10):
-        result = await meshcore.commands.get_channel(idx)
-        if result.type != EventType.ERROR and result.payload:
-            ch = result.payload
-            name = ch.get('channel_name', '').strip()
-            if name:  # Only show named channels
-                ch['idx'] = idx
-                print(format_channel(ch))
-        else:
-            break
+    # Advertisement and message handlers with known_nodes reference.
+    async def advert_handler(e):
+        await on_advertisement(e, known_nodes)
+
+    async def new_contact_handler(e):
+        await on_new_contact(e, known_nodes)
+
+    async def next_contact_handler(e):
+        await on_next_contact(e, known_nodes)
+
+    async def advert_path_handler(e):
+        await on_advert_path(e, known_nodes)
+
+    async def channel_msg_handler(e):
+        await on_channel_message(e, meshcore, rao_channel_idx)
+
+    async def contact_msg_handler(e):
+        await on_contact_message(e, meshcore)
+
+    async def contact_list_handler(e):
+        await on_contact_list(e, known_nodes)
+
+    subscriptions = [
+        meshcore.subscribe(EventType.CONTACT_MSG_RECV, contact_msg_handler),
+        meshcore.subscribe(
+            EventType.CHANNEL_MSG_RECV,
+            channel_msg_handler,
+            attribute_filters={'channel_idx': rao_channel_idx},
+        ),
+        meshcore.subscribe(EventType.RX_LOG_DATA, on_rx_log),
+        meshcore.subscribe(EventType.LOG_DATA, on_log_data),
+        meshcore.subscribe(EventType.DEVICE_INFO, on_node_info),
+        meshcore.subscribe(EventType.CONTACTS, contact_list_handler),
+        meshcore.subscribe(EventType.SELF_INFO, on_self_info),
+        meshcore.subscribe(EventType.ADVERTISEMENT, advert_handler),
+        meshcore.subscribe(EventType.NEW_CONTACT, new_contact_handler),
+        meshcore.subscribe(EventType.NEXT_CONTACT, next_contact_handler),
+        meshcore.subscribe(EventType.ADVERT_PATH, advert_path_handler),
+        meshcore.subscribe(EventType.CONTACT_DELETED, on_generic_event),
+        meshcore.subscribe(EventType.CONTACTS_FULL, on_generic_event),
+        meshcore.subscribe(EventType.MSG_SENT, on_generic_event),
+        meshcore.subscribe(EventType.ACK, on_generic_event),
+        meshcore.subscribe(EventType.ERROR, on_generic_event),
+        meshcore.subscribe(EventType.PATH_UPDATE, on_generic_event),
+        meshcore.subscribe(EventType.TELEMETRY_RESPONSE, on_generic_event),
+        meshcore.subscribe(EventType.BATTERY, on_generic_event),
+        meshcore.subscribe(EventType.STATS_CORE, on_generic_event),
+        meshcore.subscribe(EventType.STATS_RADIO, on_generic_event),
+        meshcore.subscribe(EventType.STATS_PACKETS, on_generic_event),
+    ]
 
     # Send advert
     print("\n📢 Sending advert...")
@@ -1513,28 +1566,28 @@ async def main():
 
     # Initial data collection on startup
     print("\n🌤️  Fetching initial weather...")
-    await send_weather_to_channel(meshcore, WEATHER_AUTO_SEND_CHANNEL)
+    await send_weather_to_channel(meshcore, rao_channel_idx)
     
     print("\n📡 Fetching initial repeater telemetry...")
     known_nodes = load_known_nodes()
-    await check_all_repeaters_telemetry(meshcore, known_nodes)
+    await check_all_repeaters_telemetry(meshcore, known_nodes, rao_channel_idx)
 
     print("\n" + "="*70)
-    print("🎯 MONITORING ALL CHANNELS + ADVERTISEMENTS")
+    print(f"🎯 MONITORING {MESHCORE_CHANNEL_NAME} + ADVERTISEMENTS")
     print(f"💾 Known nodes saved to: {KNOWN_NODES_FILE}")
-    print("⌨️  Ctrl+A = Send advert  |  Ctrl+F = Weather to #Public  |  Ctrl+C = Exit")
+    print(f"⌨️  Ctrl+A = Send advert  |  Ctrl+F = Weather to {MESHCORE_CHANNEL_NAME}  |  Ctrl+C = Exit")
     if WEATHER_AUTO_SEND_ENABLED:
-        print(f"🌤️  Auto weather: every {WEATHER_AUTO_SEND_INTERVAL} min to channel #{WEATHER_AUTO_SEND_CHANNEL}")
+        print(f"🌤️  Auto weather: every {WEATHER_AUTO_SEND_INTERVAL} min to channel #{rao_channel_idx}")
     if TELEMETRY_AUTO_SEND_ENABLED:
-        print(f"📡 Auto telemetry: every {TELEMETRY_AUTO_SEND_INTERVAL} min to channel #{TELEMETRY_AUTO_SEND_CHANNEL}")
+        print(f"📡 Auto telemetry: every {TELEMETRY_AUTO_SEND_INTERVAL} min to channel #{rao_channel_idx}")
     print("="*70 + "\n")
 
     # Run keyboard listener alongside main loop, auto weather sender, and auto telemetry sender
     try:
         await asyncio.gather(
-            keyboard_listener(meshcore),
-            auto_weather_sender(meshcore),
-            auto_telemetry_sender(meshcore),
+            keyboard_listener(meshcore, rao_channel_idx),
+            auto_weather_sender(meshcore, rao_channel_idx),
+            auto_telemetry_sender(meshcore, rao_channel_idx),
             asyncio.Event().wait()  # Wait forever
         )
     except KeyboardInterrupt:
