@@ -1417,6 +1417,16 @@ async def auto_telemetry_sender(meshcore, channel_idx: int):
         await check_all_repeaters_telemetry(meshcore, known_nodes, channel_idx)
 
 
+async def fetch_initial_telemetry_if_enabled(meshcore, channel_idx: int):
+    """Fetch repeater telemetry at startup only when automatic sending is enabled."""
+    if not TELEMETRY_AUTO_SEND_ENABLED:
+        return
+
+    print("\n📡 Fetching initial repeater telemetry...")
+    known_nodes = load_known_nodes()
+    await check_all_repeaters_telemetry(meshcore, known_nodes, channel_idx)
+
+
 async def keyboard_listener(meshcore, channel_idx: int):
     """Listen for keyboard input (Ctrl+A, Ctrl+F)."""
     fd = sys.stdin.fileno()
@@ -1568,9 +1578,7 @@ async def main():
     print("\n🌤️  Fetching initial weather...")
     await send_weather_to_channel(meshcore, rao_channel_idx)
     
-    print("\n📡 Fetching initial repeater telemetry...")
-    known_nodes = load_known_nodes()
-    await check_all_repeaters_telemetry(meshcore, known_nodes, rao_channel_idx)
+    await fetch_initial_telemetry_if_enabled(meshcore, rao_channel_idx)
 
     print("\n" + "="*70)
     print(f"🎯 MONITORING {MESHCORE_CHANNEL_NAME} + ADVERTISEMENTS")

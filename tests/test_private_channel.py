@@ -4,7 +4,7 @@ import io
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from meshcore import EventType
 
@@ -127,6 +127,16 @@ class PrivateChannelTests(unittest.TestCase):
         self.assertNotIn("WEATHER_AUTO_SEND_CHANNEL", source)
         self.assertNotIn("TELEMETRY_AUTO_SEND_CHANNEL", source)
         self.assertNotIn("send_chan_msg(0", source)
+
+    def test_disabled_telemetry_does_not_fetch_initial_status(self):
+        with patch.object(monitor, "TELEMETRY_AUTO_SEND_ENABLED", False), patch.object(
+            monitor,
+            "check_all_repeaters_telemetry",
+            new_callable=AsyncMock,
+        ) as check_telemetry:
+            asyncio.run(monitor.fetch_initial_telemetry_if_enabled(FakeMeshCore(), 3))
+
+        check_telemetry.assert_not_awaited()
 
 
 if __name__ == "__main__":
