@@ -203,12 +203,22 @@ class PrivateChannelTests(unittest.TestCase):
         self.assertEqual(meshcore.commands.sent, [(3, "Boa noite 🌙, @PR2YZ")])
 
     def test_hidden_version_aliases_return_version(self):
+        query_time = datetime(
+            2026,
+            11,
+            20,
+            18,
+            30,
+            45,
+            tzinfo=monitor.WEATHER_TIMEZONE,
+        )
         for command in ("v", "ver", "version", "versao", "versão"):
             with self.subTest(command=command), patch.object(
                 monitor,
                 "get_app_version",
                 return_value="20261120.141931",
-            ):
+            ), patch.object(monitor, "datetime") as mocked_datetime:
+                mocked_datetime.now.return_value = query_time
                 meshcore = FakeMeshCore()
                 asyncio.run(
                     monitor.handle_channel_mention(
@@ -220,8 +230,32 @@ class PrivateChannelTests(unittest.TestCase):
 
                 self.assertEqual(
                     meshcore.commands.sent,
-                    [(3, "💻 Versão: 20261120.141931")],
+                    [
+                        (
+                            3,
+                            "💻 Versão: 20261120.141931\r\n"
+                            "Consultado em: 20/11/2026 18:30:45",
+                        )
+                    ],
                 )
+
+    def test_version_response_formats_query_timestamp(self):
+        query_time = datetime(
+            2026,
+            11,
+            20,
+            9,
+            5,
+            7,
+            tzinfo=monitor.WEATHER_TIMEZONE,
+        )
+
+        with patch.object(monitor, "get_app_version", return_value="20261120.141931"):
+            self.assertEqual(
+                monitor.format_version_response(query_time),
+                "💻 Versão: 20261120.141931\r\n"
+                "Consultado em: 20/11/2026 09:05:07",
+            )
 
     def test_version_file_is_validated(self):
         with TemporaryDirectory() as directory:
