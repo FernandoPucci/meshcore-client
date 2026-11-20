@@ -81,6 +81,13 @@ def get_app_version() -> str:
     return version if VERSION_PATTERN.fullmatch(version) else "invalida"
 
 
+def format_version_response(now: Optional[datetime] = None) -> str:
+    """Format the hidden version response with the local query timestamp."""
+    current_time = now or datetime.now(WEATHER_TIMEZONE)
+    timestamp = current_time.strftime("%d/%m/%Y %H:%M:%S")
+    return f"💻 Versão: {get_app_version()}\r\nConsultado em: {timestamp}"
+
+
 def wrap_text(text, width=BOX_WIDTH - 4):
     """Wrap text to fit in box."""
     if not text:
@@ -698,7 +705,7 @@ async def handle_channel_mention(
 
     # Keep the version command hidden from the public help message.
     if re.fullmatch(r"(?:V|VER|VERSION|VERS(?:AO|ÃO))", command_text, re.IGNORECASE):
-        response = f"💻 Versão: {get_app_version()}"
+        response = format_version_response()
         await meshcore.commands.send_chan_msg(channel_idx, response)
         print(f"   ✅ Version sent to channel #{channel_idx}")
         return
