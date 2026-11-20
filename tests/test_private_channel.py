@@ -248,7 +248,7 @@ class PrivateChannelTests(unittest.TestCase):
 
         self.assertEqual(
             monitor.format_ping_response(result),
-            "👂 PR2YZ: RX 📶 -42dBm/12,5dB\r\nDireto!",
+            "👂 PR2YZ: RX 📶 -42dBm/12,5dB\r\n🎯 Direto!",
         )
 
     def test_help_lists_ping_command(self):
