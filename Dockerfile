@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY meshcore_monitor.py .
+COPY VERSION .
 COPY known_nodes.json .
 COPY .env.example .
 

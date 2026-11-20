@@ -4,6 +4,7 @@ import io
 import unittest
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -200,6 +201,54 @@ class PrivateChannelTests(unittest.TestCase):
             )
 
         self.assertEqual(meshcore.commands.sent, [(3, "Boa noite 🌙, @PR2YZ")])
+
+    def test_hidden_version_aliases_return_version(self):
+        for command in ("v", "ver", "version", "versao", "versão"):
+            with self.subTest(command=command), patch.object(
+                monitor,
+                "get_app_version",
+                return_value="20261120.141931",
+            ):
+                meshcore = FakeMeshCore()
+                asyncio.run(
+                    monitor.handle_channel_mention(
+                        meshcore,
+                        3,
+                        f"PR2YZ: @[RAO-BOT 🤖] {command}",
+                    )
+                )
+
+                self.assertEqual(
+                    meshcore.commands.sent,
+                    [(3, "💻 Versão: 20261120.141931")],
+                )
+
+    def test_version_file_is_validated(self):
+        with TemporaryDirectory() as directory:
+            version_file = Path(directory) / "VERSION"
+            with self.subTest("valid version"):
+                version_file.write_text("20261120.141931\n", encoding="ascii")
+                with patch.object(monitor, "VERSION_FILE", version_file):
+                    self.assertEqual(monitor.get_app_version(), "20261120.141931")
+
+            with self.subTest("invalid version"):
+                version_file.write_text("manual-version\n", encoding="ascii")
+                with patch.object(monitor, "VERSION_FILE", version_file):
+                    self.assertEqual(monitor.get_app_version(), "invalida")
+
+    def test_version_command_is_not_listed_in_help(self):
+        meshcore = FakeMeshCore()
+
+        asyncio.run(
+            monitor.handle_channel_mention(
+                meshcore,
+                3,
+                "@[RAO-BOT 🤖] AJUDA",
+            )
+        )
+
+        self.assertNotIn("VERSION", meshcore.commands.sent[0][1])
+        self.assertNotIn("VERSAO", meshcore.commands.sent[0][1])
 
     def test_ping_formats_signal_and_three_hops_per_line(self):
         result = {
