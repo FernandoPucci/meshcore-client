@@ -142,7 +142,7 @@ class PrivateChannelTests(unittest.TestCase):
             message,
             "👂 PR2YZ: RX 📶 -42dBm/12,5dB\r\n"
             "🛣️ 6 saltos\r\n"
-            "8269<5e17<13a1\r\n8abc<44de<91ff",
+            "8269>5e17>13a1\r\n8abc>44de>91ff",
         )
 
     def test_ping_appends_ellipsis_when_over_maximum(self):
@@ -175,7 +175,7 @@ class PrivateChannelTests(unittest.TestCase):
             monitor.format_channel_ping_response(message),
             "👂 PR2YZ: RX 📶 -42dBm/12,5dB\r\n"
             "🛣️ 6 saltos\r\n"
-            "8269<5e17<13a1\r\n8abc<44de<91ff",
+            "8269>5e17>13a1\r\n8abc>44de>91ff",
         )
 
     def test_ping_mention_sends_formatted_response(self):
@@ -205,7 +205,7 @@ class PrivateChannelTests(unittest.TestCase):
                     3,
                     "👂 PR2YZ: RX 📶 -42dBm/12,5dB\r\n"
                     "🛣️ 3 saltos\r\n"
-                    "8269<5e17<13a1",
+                    "8269>5e17>13a1",
                 )
             ],
         )
@@ -232,7 +232,7 @@ class PrivateChannelTests(unittest.TestCase):
 
         self.assertEqual(
             meshcore.commands.sent[0][1],
-            "👂 PR2YZ: RX 📶 -42dBm/12,5dB\r\n🛣️ 3 saltos\r\n8269<5e17<13a1",
+            "👂 PR2YZ: RX 📶 -42dBm/12,5dB\r\n🛣️ 3 saltos\r\n8269>5e17>13a1",
         )
 
     def test_ping_uses_direct_for_zero_hops(self):

@@ -472,7 +472,7 @@ def format_ping_response(result: dict, max_length: int = MAX_MESSAGE_LENGTH) -> 
     lines.append("🎯 Direto!" if hop_count == 0 else f"🛣️ {hop_count} saltos")
     path = _format_ping_path(result.get("in_path", ""), result.get("in_path_hash_len", 1))
     for index in range(0, len(path), 3):
-        lines.append("<".join(path[index:index + 3]))
+        lines.append(">".join(path[index:index + 3]))
 
     return truncate_message("\r\n".join(lines), max_length)
 
