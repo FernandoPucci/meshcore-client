@@ -420,6 +420,94 @@ def parse_channel_key(channel_key_hex: str) -> bytes:
     return bytes.fromhex(channel_key_hex)
 
 
+def truncate_message(message: str, max_length: int = MAX_MESSAGE_LENGTH) -> str:
+    """Keep a message within the radio limit and mark truncated output."""
+    if len(message) <= max_length:
+        return message
+    if max_length <= 3:
+        return "." * max_length
+    return message[:max_length - 3] + "..."
+
+
+def _format_signal_value(value, decimals: int = 1) -> str:
+    """Format a numeric signal value using the locale-style decimal comma."""
+    if value is None or value == "?":
+        return "?"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.{decimals}f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _format_ping_path(path_hex: str, hash_len: int) -> list:
+    """Split a hexadecimal path into short identifiers for the reply."""
+    if not path_hex:
+        return []
+    try:
+        chunk_size = max(1, int(hash_len)) * 2
+    except (TypeError, ValueError):
+        chunk_size = 2
+    return [path_hex[index:index + chunk_size][:4] for index in range(0, len(path_hex), chunk_size)]
+
+
+def format_ping_response(result: dict, max_length: int = MAX_MESSAGE_LENGTH) -> str:
+    """Format a compact ping result with up to three path hops per line."""
+    name = result.get("name") or "Contato"
+    if not result.get("success"):
+        return truncate_message(f"👂 {name}: {result.get('error', 'sem resposta')}", max_length)
+
+    rssi = _format_signal_value(result.get("rssi"), decimals=0)
+    snr = _format_signal_value(result.get("snr"), decimals=1)
+    hop_count = result.get("in_path_len", 0)
+    try:
+        hop_count = int(hop_count)
+    except (TypeError, ValueError):
+        hop_count = 0
+
+    lines = [f"👂 {name}: R 📶 {rssi}dBm/{snr}dB | 🛣️ {hop_count} saltos"]
+    path = _format_ping_path(result.get("in_path", ""), result.get("in_path_hash_len", 1))
+    for index in range(0, len(path), 3):
+        lines.append("<".join(path[index:index + 3]))
+
+    return truncate_message("\r\n".join(lines), max_length)
+
+
+def format_channel_ping_response(message: dict) -> str:
+    """Format the signal and return path received in a channel message."""
+    text = message.get("text", "")
+    sender_name, separator, _ = text.partition(":")
+    if not separator or not sender_name.strip():
+        sender_name = message.get("sender_name", "Contato")
+
+    path_len = message.get("path_len", 0)
+    try:
+        path_len = int(path_len)
+    except (TypeError, ValueError):
+        path_len = 0
+    if path_len == 255:
+        path_len = 0
+
+    path_hash_mode = message.get("path_hash_mode", -1)
+    try:
+        path_hash_len = 1 << int(path_hash_mode) if int(path_hash_mode) >= 0 else 1
+    except (TypeError, ValueError):
+        path_hash_len = 1
+
+    return format_ping_response({
+        "success": True,
+        "name": sender_name.strip(),
+        "rssi": message.get("RSSI", message.get("rssi", "?")),
+        "snr": message.get("SNR", message.get("snr", "?")),
+        "in_path_len": path_len,
+        "in_path_hash_len": path_hash_len,
+        "in_path": message.get("path", ""),
+    })
+
+
 async def resolve_configured_channel(meshcore, max_channels: int = 40) -> int:
     """Find the exact configured private channel on the connected device."""
     if not MESHCORE_CHANNEL_NAME:
@@ -532,13 +620,18 @@ async def on_channel_message(event, meshcore=None, allowed_channel_idx: Optional
     ])
     _print_lines(lines)
 
-    # Handle @mentions for METAR and CLIMA commands in channel messages
+    # Handle @mentions for METAR, CLIMA, STATUS, and PING commands.
     if meshcore and channel_idx is not None:
-        await handle_channel_mention(meshcore, channel_idx, text)
+        await handle_channel_mention(meshcore, channel_idx, text, message=msg)
 
 
-async def handle_channel_mention(meshcore, channel_idx: int, text: str):
-    """Handle @mentions in channel messages for METAR and CLIMA commands."""
+async def handle_channel_mention(
+    meshcore,
+    channel_idx: int,
+    text: str,
+    message: Optional[dict] = None,
+):
+    """Handle @mentions in channel messages for supported commands."""
     if not text:
         return
     
@@ -558,11 +651,23 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
     if re.search(r'\b(AJUDA|HELP)\b', command_upper):
         print(f"❓ Channel #{channel_idx}: @mention AJUDA/HELP request")
         header = f"Comandos @[{bot_name_with_emoji}]:"
-        help_msg = f"{header}\r\n-CLIMA (clima atual em RAO)\r\n-METAR<ICAO> (ex: METAR SBRP)\r\n-STATUS<PUBKEY> (telemetria repetidora)"
+        help_msg = f"{header}\r\n-CLIMA (clima atual em RAO)\r\n-METAR<ICAO> (ex: METAR SBRP)\r\n-STATUS<PUBKEY> (telemetria repetidora)\r\n-PING (sinal recebido)"
         await meshcore.commands.send_chan_msg(channel_idx, help_msg)
         print(f"   ✅ Help sent to channel #{channel_idx}")
         return
-    
+
+    # Handle PING command using the signal data from this received message.
+    if re.fullmatch(r"PING", command_text, re.IGNORECASE):
+        response = format_channel_ping_response(message or {"text": text})
+        await meshcore.commands.send_chan_msg(channel_idx, response)
+        print(f"   ✅ PING response sent to channel #{channel_idx}")
+        return
+
+    if re.search(r"\bPING\b", command_upper):
+        help_msg = "Use PING sem PUBKEY para consultar o sinal recebido"
+        await meshcore.commands.send_chan_msg(channel_idx, help_msg)
+        return
+
     # Handle STATUS command
     status_match = re.search(r'\bSTATUS\s+([A-Fa-f0-9]{64})\b', command_text, re.IGNORECASE)
     if status_match:
@@ -1503,6 +1608,7 @@ async def main():
         await meshcore.disconnect()
         sys.exit(1)
     print(f"   ✅ Using {MESHCORE_CHANNEL_NAME} at channel index {rao_channel_idx}")
+    meshcore.set_decrypt_channel_logs(True)
 
     # Clear hardware contacts only after the required channel was validated.
     await clear_hardware_contacts(meshcore)
