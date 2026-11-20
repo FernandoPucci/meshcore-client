@@ -32,6 +32,8 @@ load_dotenv()
 SERIAL_PORT = os.getenv("SERIAL_PORT", "/dev/ttyUSB0")
 BAUDRATE = int(os.getenv("BAUDRATE", "115200"))
 KNOWN_NODES_FILE = Path(os.getenv("KNOWN_NODES_FILE", "known_nodes.json"))
+VERSION_FILE = Path(__file__).with_name("VERSION")
+VERSION_PATTERN = re.compile(r"\d{8}\.\d{6}")
 
 # Display width for boxes
 BOX_WIDTH = int(os.getenv("BOX_WIDTH", "72"))
@@ -68,6 +70,15 @@ REPEATER_TELEMETRY_PASSWORD = os.getenv("REPEATER_TELEMETRY_PASSWORD", "CRRP2O26
 
 # Debug Configuration
 DEBUG_ENABLED = os.getenv("DEBUG_ENABLED", "true").lower() == "true"
+
+
+def get_app_version() -> str:
+    """Read the validated application version from the repository version file."""
+    try:
+        version = VERSION_FILE.read_text(encoding="ascii").strip()
+    except (OSError, UnicodeError):
+        return "indisponivel"
+    return version if VERSION_PATTERN.fullmatch(version) else "invalida"
 
 
 def wrap_text(text, width=BOX_WIDTH - 4):
@@ -684,6 +695,13 @@ async def handle_channel_mention(
     
     command_text = match.group(1).strip()
     command_upper = command_text.upper()
+
+    # Keep the version command hidden from the public help message.
+    if re.fullmatch(r"(?:V|VER|VERSION|VERS(?:AO|ÃO))", command_text, re.IGNORECASE):
+        response = f"💻 Versão: {get_app_version()}"
+        await meshcore.commands.send_chan_msg(channel_idx, response)
+        print(f"   ✅ Version sent to channel #{channel_idx}")
+        return
 
     greeting_response = format_greeting_response(
         command_text,
