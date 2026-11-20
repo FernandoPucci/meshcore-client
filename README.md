@@ -20,6 +20,7 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 - **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal privado: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
 - **Envio automático de tempo/clima (cron)** - Configurável via variáveis de ambiente: envia periodicamente no canal privado com emoji + descrição em português do tempo e fase da lua
 - **Resposta a @menções no canal privado** - Responde a `@[NomeDoNo] METAR SBRP`, `@[NomeDoNo] CLIMA`, `@[NomeDoNo] STATUS <PUBKEY>` e `@[NomeDoNo] PING` no próprio canal
+- **Saudações por @menção** - Responde `BOM DIA`, `BOA TARDE` ou `BOA NOITE` com o período correto e menciona o remetente
 - **PING manual no canal** - Responde com o RSSI/SNR e a rota recebida do usuário que solicitou o PING
 - **Telemetria automática de repetidoras** - Verifica periodicamente a telemetria de todas as repetidoras conhecidas (tipo 2) e publica no `RAO_MESHCORE`, ordenadas por força de sinal
 - **Validação automática do nome do nó** - Na inicialização, verifica se o nome do nó corresponde a `MY_NODE_NAME` e atualiza se necessário
@@ -434,6 +435,7 @@ O bot monitora somente mensagens no canal privado `RAO_MESHCORE` e responde auto
 | `CLIMA` | Consulta tempo/clima atual | `@[MeshMonitor 🤖] CLIMA` |
 | `STATUS <PUBKEY>` | Telemetria da repetidora (chave 64 chars) | `@[MeshMonitor 🤖] STATUS 31898b80ada6...` |
 | `PING` | Sinal e rota recebida da mensagem do usuário | `@[MeshMonitor 🤖] PING` |
+| `BOM DIA`, `BOA TARDE`, `BOA NOITE` | Saudação conforme o horário local, mencionando o remetente | `@[MeshMonitor 🤖] Boa noite` |
 | `AJUDA` / `HELP` | Lista comandos disponíveis | `@[MeshMonitor 🤖] AJUDA` |
 
 ### Formato da menção
@@ -495,6 +497,16 @@ Fernando PR2YZ: @[MeshMonitor 🤖] PING
 
 **Usuário no RAO_MESHCORE:**
 ```
+PR2YZ: @[MeshMonitor 🤖] Boa noite
+```
+
+**Resposta do bot no RAO_MESHCORE:**
+```
+Boa noite 🌙, @PR2YZ
+```
+
+**Usuário no RAO_MESHCORE:**
+```
 @[MeshMonitor 🤖] AJUDA
 ```
 
@@ -505,6 +517,7 @@ Comandos @[MeshMonitor 🤖]:
 -METAR<ICAO> (ex: METAR SBRP)
 -STATUS<PUBKEY> (telemetria repetidora)
 -PING (sinal recebido)
+-BOM DIA/BOA TARDE/BOA NOITE (saudacao)
 ```
 
 **Usuário no RAO_MESHCORE (METAR sem aeroporto):**

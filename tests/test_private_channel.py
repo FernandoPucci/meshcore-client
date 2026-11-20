@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import io
 import unittest
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -124,6 +125,81 @@ class PrivateChannelTests(unittest.TestCase):
             asyncio.run(monitor.send_weather_to_channel(meshcore, 3))
 
         self.assertEqual(meshcore.commands.sent, [(3, "weather message")])
+
+    def test_greeting_uses_current_period_and_mentions_sender(self):
+        cases = [
+            (0, 0, "Bom dia ☀️, @PR2YZ"),
+            (11, 59, "Bom dia ☀️, @PR2YZ"),
+            (12, 0, "Boa tarde 🌤️, @PR2YZ"),
+            (17, 59, "Boa tarde 🌤️, @PR2YZ"),
+            (18, 0, "Boa noite 🌙, @PR2YZ"),
+        ]
+
+        for hour, minute, expected in cases:
+            with self.subTest(hour=hour, minute=minute):
+                now = datetime(
+                    2026,
+                    1,
+                    1,
+                    hour,
+                    minute,
+                    tzinfo=monitor.WEATHER_TIMEZONE,
+                )
+                self.assertEqual(
+                    monitor.format_greeting_response("Boa noite", "PR2YZ", now),
+                    expected,
+                )
+
+    def test_greeting_mention_corrects_requested_period(self):
+        meshcore = FakeMeshCore()
+        message = {
+            "text": "PR2YZ: @[RAO-BOT 🤖] Boa Noite",
+        }
+
+        with patch.object(monitor, "datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = datetime(
+                2026,
+                1,
+                1,
+                9,
+                tzinfo=monitor.WEATHER_TIMEZONE,
+            )
+            asyncio.run(
+                monitor.handle_channel_mention(
+                    meshcore,
+                    3,
+                    message["text"],
+                    message=message,
+                )
+            )
+
+        self.assertEqual(meshcore.commands.sent, [(3, "Bom dia ☀️, @PR2YZ")])
+
+    def test_greeting_uses_sender_metadata_when_text_has_no_prefix(self):
+        meshcore = FakeMeshCore()
+        message = {
+            "text": "@[RAO-BOT 🤖] bom dia",
+            "sender_name": "PR2YZ",
+        }
+
+        with patch.object(monitor, "datetime") as mocked_datetime:
+            mocked_datetime.now.return_value = datetime(
+                2026,
+                1,
+                1,
+                18,
+                tzinfo=monitor.WEATHER_TIMEZONE,
+            )
+            asyncio.run(
+                monitor.handle_channel_mention(
+                    meshcore,
+                    3,
+                    message["text"],
+                    message=message,
+                )
+            )
+
+        self.assertEqual(meshcore.commands.sent, [(3, "Boa noite 🌙, @PR2YZ")])
 
     def test_ping_formats_signal_and_three_hops_per_line(self):
         result = {
@@ -263,6 +339,7 @@ class PrivateChannelTests(unittest.TestCase):
         )
 
         self.assertIn("-PING (sinal recebido)", meshcore.commands.sent[0][1])
+        self.assertIn("-BOM DIA/BOA TARDE/BOA NOITE", meshcore.commands.sent[0][1])
 
     def test_no_public_channel_fallback_or_hardcoded_send(self):
         source = Path(monitor.__file__).read_text()
