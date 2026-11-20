@@ -454,6 +454,43 @@ def _format_ping_path(path_hex: str, hash_len: int) -> list:
     return [path_hex[index:index + chunk_size][:4] for index in range(0, len(path_hex), chunk_size)]
 
 
+def _channel_sender_name(text: str, message: Optional[dict] = None) -> str:
+    """Get the sender name used to mention the author of a channel message."""
+    sender_name = (message or {}).get("sender_name")
+    if sender_name:
+        return str(sender_name).strip().lstrip("@") or "Contato"
+
+    sender_name, separator, _ = text.partition(":")
+    if separator and sender_name.strip():
+        return sender_name.strip().lstrip("@")
+    return "Contato"
+
+
+def format_greeting_response(
+    command_text: str,
+    sender_name: str,
+    now: Optional[datetime] = None,
+) -> Optional[str]:
+    """Return the greeting for the current local period, mentioning its sender."""
+    if not re.fullmatch(
+        r"(?:BOM\s+DIA|BOA\s+TARDE|BOA\s+NOITE)[!.?]?",
+        command_text,
+        re.IGNORECASE,
+    ):
+        return None
+
+    current_time = now or datetime.now(WEATHER_TIMEZONE)
+    if current_time.hour < 12:
+        greeting, emoji = "Bom dia", "☀️"
+    elif current_time.hour < 18:
+        greeting, emoji = "Boa tarde", "🌤️"
+    else:
+        greeting, emoji = "Boa noite", "🌙"
+
+    mention = sender_name.strip().lstrip("@") or "Contato"
+    return f"{greeting} {emoji}, @{mention}"
+
+
 def format_ping_response(result: dict, max_length: int = MAX_MESSAGE_LENGTH) -> str:
     """Format a compact ping result with up to three path hops per line."""
     name = result.get("name") or "Contato"
@@ -647,12 +684,22 @@ async def handle_channel_mention(
     
     command_text = match.group(1).strip()
     command_upper = command_text.upper()
+
+    greeting_response = format_greeting_response(
+        command_text,
+        _channel_sender_name(text, message),
+    )
+    if greeting_response:
+        print(f"👋 Channel #{channel_idx}: greeting response")
+        await meshcore.commands.send_chan_msg(channel_idx, greeting_response)
+        print(f"   ✅ Greeting sent to channel #{channel_idx}")
+        return
     
     # Handle HELP/AJUDA command
     if re.search(r'\b(AJUDA|HELP)\b', command_upper):
         print(f"❓ Channel #{channel_idx}: @mention AJUDA/HELP request")
         header = f"Comandos @[{bot_name_with_emoji}]:"
-        help_msg = f"{header}\r\n-CLIMA (clima atual em RAO)\r\n-METAR<ICAO> (ex: METAR SBRP)\r\n-STATUS<PUBKEY> (telemetria repetidora)\r\n-PING (sinal recebido)"
+        help_msg = f"{header}\r\n-CLIMA (clima atual em RAO)\r\n-METAR<ICAO> (ex: METAR SBRP)\r\n-STATUS<PUBKEY> (telemetria repetidora)\r\n-PING (sinal recebido)\r\n-BOM DIA/BOA TARDE/BOA NOITE (saudacao)"
         await meshcore.commands.send_chan_msg(channel_idx, help_msg)
         print(f"   ✅ Help sent to channel #{channel_idx}")
         return
