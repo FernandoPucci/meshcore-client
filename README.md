@@ -19,8 +19,8 @@ Aplicação Python para monitorar um nó MeshCore Companion via porta serial, ex
 - **Consulta METAR via REDEMET API** - Responde a DMs com `METAR <ICAO>` (ex: `METAR SBRP`) retornando dados meteorológicos formatados
 - **Envio de tempo/clima via Open-Meteo API** - Ctrl+F publica no canal privado: temperatura, umidade, fase da lua, hora e data (máx. 130 chars)
 - **Envio automático de tempo/clima (cron)** - Configurável via variáveis de ambiente: envia periodicamente no canal privado com emoji + descrição em português do tempo e fase da lua
-- **Resposta a @menções no canal privado** - Responde a `@[NomeDoNo] METAR SBRP`, `@[NomeDoNo] CLIMA`, `@[NomeDoNo] STATUS <PUBKEY>` e `@[NomeDoNo] PING <PUBKEY>` no próprio canal
-- **PING manual de contatos** - Mede RSSI/SNR e mostra a rota de retorno em grupos de três saltos por linha
+- **Resposta a @menções no canal privado** - Responde a `@[NomeDoNo] METAR SBRP`, `@[NomeDoNo] CLIMA`, `@[NomeDoNo] STATUS <PUBKEY>` e `@[NomeDoNo] PING` no próprio canal
+- **PING manual no canal** - Responde com o RSSI/SNR e a rota recebida do usuário que solicitou o PING
 - **Telemetria automática de repetidoras** - Verifica periodicamente a telemetria de todas as repetidoras conhecidas (tipo 2) e publica no `RAO_MESHCORE`, ordenadas por força de sinal
 - **Validação automática do nome do nó** - Na inicialização, verifica se o nome do nó corresponde a `MY_NODE_NAME` e atualiza se necessário
 
@@ -433,7 +433,7 @@ O bot monitora somente mensagens no canal privado `RAO_MESHCORE` e responde auto
 | `METAR <ICAO>` | Consulta METAR na REDEMET | `@[MeshMonitor 🤖] METAR SBRP` |
 | `CLIMA` | Consulta tempo/clima atual | `@[MeshMonitor 🤖] CLIMA` |
 | `STATUS <PUBKEY>` | Telemetria da repetidora (chave 64 chars) | `@[MeshMonitor 🤖] STATUS 31898b80ada6...` |
-| `PING <PUBKEY>` | Sinal e rota de retorno do contato | `@[MeshMonitor 🤖] PING 31898b80ada6` |
+| `PING` | Sinal e rota recebida da mensagem do usuário | `@[MeshMonitor 🤖] PING` |
 | `AJUDA` / `HELP` | Lista comandos disponíveis | `@[MeshMonitor 🤖] AJUDA` |
 
 ### Formato da menção
@@ -441,7 +441,7 @@ O bot monitora somente mensagens no canal privado `RAO_MESHCORE` e responde auto
 ```
 @[NomeDoNo 🤖] METAR SBRP
 @[NomeDoNo 🤖] CLIMA
-@[NomeDoNo 🤖] PING <PUBKEY>
+@[NomeDoNo 🤖] PING
 @[NomeDoNo 🤖] AJUDA
 ```
 
@@ -450,11 +450,10 @@ O bot monitora somente mensagens no canal privado `RAO_MESHCORE` e responde auto
 - A resposta é enviada **no mesmo canal** onde a menção foi recebida
 - Para METAR: retorna o METAR completo com timestamp (máx. 130 chars)
 - Para CLIMA: retorna temperatura, umidade, fase da lua com descrição em português
-- Para PING: retorna RSSI em dBm, SNR em dB e a rota de retorno, com até três saltos por linha
-- A chave do PING pode ser completa ou um prefixo hexadecimal único encontrado em `known_nodes.json`
+- Para PING: retorna RSSI em dBm, SNR em dB e a rota recebida, com até três saltos por linha
 - Quando a resposta exceder `MAX_MESSAGE_LENGTH`, o texto termina com `...`
 - Se enviar `METAR` sem código ICAO: retorna instrução de uso
-- Se enviar `PING` sem chave: retorna instrução de uso
+- O PING deve ser enviado sem PUBKEY; o nome e os dados são obtidos da própria mensagem recebida
 - Se enviar comando não reconhecido: retorna ajuda com comandos disponíveis
 
 ### Exemplo de interação
@@ -484,7 +483,7 @@ Clima RAO ☀️ Céu limpo
 
 **Usuário no RAO_MESHCORE:**
 ```
-@[MeshMonitor 🤖] PING 31898b80ada674316d8623976ca049124f0bcf9fc6dba934df01128f578b3636
+Fernando PR2YZ: @[MeshMonitor 🤖] PING
 ```
 
 **Resposta do bot no RAO_MESHCORE:**
@@ -505,7 +504,7 @@ Comandos @[MeshMonitor 🤖]:
 -CLIMA (clima atual em RAO)
 -METAR<ICAO> (ex: METAR SBRP)
 -STATUS<PUBKEY> (telemetria repetidora)
--PING<PUBKEY> (rota e sinal do contato)
+-PING (sinal recebido)
 ```
 
 **Usuário no RAO_MESHCORE (METAR sem aeroporto):**
@@ -584,8 +583,6 @@ DEBUG_ENABLED=true
 # Bot Node Name (para @menções em canais)
 MY_NODE_NAME=MeshMonitor
 
-# Manual Ping (timeout da descoberta de rota em segundos)
-PING_TIMEOUT=30
 ```
 
 ### Variáveis de ambiente principais
@@ -606,7 +603,6 @@ PING_TIMEOUT=30
 | `REPEATER_TELEMETRY_PASSWORD` | Senha para login em repetidoras antes de telemetria | `CRRP2O26` |
 | `DEBUG_ENABLED` | Habilita saída de debug detalhada (true/false) | `true` |
 | `MY_NODE_NAME` | Nome base do nó (emoji 🤖 adicionado automaticamente) | `MeshMonitor` |
-| `PING_TIMEOUT` | Timeout da descoberta de rota do comando PING, em segundos | `30` |
 
 > **Nota:** O sistema adiciona automaticamente o emoji 🤖 ao nome configurado em `MY_NODE_NAME` na inicialização. Ex: `MY_NODE_NAME=MeshMonitor` → nome no dispositivo = `MeshMonitor 🤖`. Use o nome completo com emoji nas @menções.
 

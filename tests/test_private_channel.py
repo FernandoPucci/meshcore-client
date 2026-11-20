@@ -36,42 +36,6 @@ class FakeMeshCore:
         self.commands = FakeCommands(channels)
 
 
-class FakePingCommands:
-    def __init__(self, meshcore):
-        self.meshcore = meshcore
-        self.calls = []
-
-    async def send_path_discovery_sync(self, pubkey, timeout):
-        self.calls.append((pubkey, timeout))
-        self.meshcore.ping_callback(
-            SimpleNamespace(
-                payload={
-                    "payload_typename": "PATH",
-                    "rssi": -42,
-                    "snr": 12.5,
-                }
-            )
-        )
-        return result(
-            EventType.PATH_RESPONSE,
-            {
-                "in_path_len": 6,
-                "in_path_hash_len": 2,
-                "in_path": "82695e1713a18abc44de91ff",
-            },
-        )
-
-
-class FakePingMeshCore:
-    def __init__(self):
-        self.ping_callback = None
-        self.commands = FakePingCommands(self)
-
-    def subscribe(self, event_type, callback):
-        self.ping_callback = callback
-        return SimpleNamespace(unsubscribe=lambda: None)
-
-
 class PrivateChannelTests(unittest.TestCase):
     def setUp(self):
         self.original_name = monitor.MESHCORE_CHANNEL_NAME
@@ -196,52 +160,42 @@ class PrivateChannelTests(unittest.TestCase):
         self.assertLessEqual(len(message), 80)
         self.assertTrue(message.endswith("..."))
 
-    def test_ping_uses_unique_known_node_prefix_and_path_response_signal(self):
-        pubkey = "a" * 64
-        meshcore = FakePingMeshCore()
-
-        result = asyncio.run(monitor.ping_contact(meshcore, pubkey, "PR2YZ"))
-
-        self.assertEqual(meshcore.commands.calls, [(pubkey, monitor.PING_TIMEOUT)])
-        self.assertEqual(result["rssi"], -42)
-        self.assertEqual(result["snr"], 12.5)
-        self.assertEqual(result["in_path_len"], 6)
-
-        resolved, error = monitor.resolve_ping_pubkey("aaaaaaaa", {pubkey: {}})
-        self.assertEqual(resolved, pubkey)
-        self.assertIsNone(error)
-
-    def test_ping_mention_sends_formatted_response(self):
-        pubkey = "b" * 64
-        meshcore = FakeMeshCore()
-        ping_result = {
-            "success": True,
-            "name": "PR2YZ",
-            "rssi": -42,
-            "snr": 12.5,
-            "in_path_len": 3,
-            "in_path_hash_len": 2,
-            "in_path": "82695e1713a1",
+    def test_ping_formats_received_channel_signal(self):
+        message = {
+            "text": "PR2YZ: @[RAO-BOT 🤖] PING",
+            "RSSI": -42,
+            "SNR": 12.5,
+            "path_len": 6,
+            "path_hash_mode": 1,
+            "path": "82695e1713a18abc44de91ff",
         }
 
-        with patch.object(
-            monitor,
-            "load_known_nodes",
-            return_value={pubkey: {"name": "PR2YZ"}},
-        ), patch.object(
-            monitor,
-            "ping_contact",
-            new=AsyncMock(return_value=ping_result),
-        ) as ping:
-            asyncio.run(
-                monitor.handle_channel_mention(
-                    meshcore,
-                    3,
-                    f"@[RAO-BOT 🤖] PING {pubkey}",
-                )
-            )
+        self.assertEqual(
+            monitor.format_channel_ping_response(message),
+            "👂 PR2YZ: R 📶 -42dBm/12,5dB | 🛣️ 6 saltos\r\n"
+            "8269<5e17<13a1\r\n8abc<44de<91ff",
+        )
 
-        ping.assert_awaited_once_with(meshcore, pubkey, "PR2YZ")
+    def test_ping_mention_sends_formatted_response(self):
+        meshcore = FakeMeshCore()
+        message = {
+            "text": "PR2YZ: @[RAO-BOT 🤖] PING",
+            "RSSI": -42,
+            "SNR": 12.5,
+            "path_len": 3,
+            "path_hash_mode": 1,
+            "path": "82695e1713a1",
+        }
+
+        asyncio.run(
+            monitor.handle_channel_mention(
+                meshcore,
+                3,
+                message["text"],
+                message=message,
+            )
+        )
+
         self.assertEqual(
             meshcore.commands.sent,
             [
@@ -251,6 +205,31 @@ class PrivateChannelTests(unittest.TestCase):
                     "8269<5e17<13a1",
                 )
             ],
+        )
+
+    def test_channel_ping_passes_received_message_metadata(self):
+        meshcore = FakeMeshCore()
+        message = {
+            "channel_idx": 3,
+            "text": "PR2YZ: @[RAO-BOT 🤖] PING",
+            "RSSI": -42,
+            "SNR": 12.5,
+            "path_len": 3,
+            "path_hash_mode": 1,
+            "path": "82695e1713a1",
+        }
+
+        asyncio.run(
+            monitor.on_channel_message(
+                SimpleNamespace(payload=message),
+                meshcore,
+                allowed_channel_idx=3,
+            )
+        )
+
+        self.assertEqual(
+            meshcore.commands.sent[0][1],
+            "👂 PR2YZ: R 📶 -42dBm/12,5dB | 🛣️ 3 saltos\r\n8269<5e17<13a1",
         )
 
     def test_help_lists_ping_command(self):
@@ -264,7 +243,7 @@ class PrivateChannelTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("-PING<PUBKEY>", meshcore.commands.sent[0][1])
+        self.assertIn("-PING (sinal recebido)", meshcore.commands.sent[0][1])
 
     def test_no_public_channel_fallback_or_hardcoded_send(self):
         source = Path(monitor.__file__).read_text()
