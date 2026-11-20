@@ -59,6 +59,9 @@ WEATHER_AUTO_SEND_INTERVAL = int(os.getenv("WEATHER_AUTO_SEND_INTERVAL", "30"))
 # Bot Node Name Configuration (for @mentions in channels)
 MY_NODE_NAME = os.getenv("MY_NODE_NAME", "MeshMonitor")
 
+# Manual ping configuration
+PING_TIMEOUT = float(os.getenv("PING_TIMEOUT", "30"))
+
 # Auto Telemetry Sending Configuration
 TELEMETRY_AUTO_SEND_ENABLED = os.getenv("TELEMETRY_AUTO_SEND_ENABLED", "false").lower() == "true"
 TELEMETRY_AUTO_SEND_INTERVAL = int(os.getenv("TELEMETRY_AUTO_SEND_INTERVAL", "60"))
@@ -420,6 +423,76 @@ def parse_channel_key(channel_key_hex: str) -> bytes:
     return bytes.fromhex(channel_key_hex)
 
 
+def truncate_message(message: str, max_length: int = MAX_MESSAGE_LENGTH) -> str:
+    """Keep a message within the radio limit and mark truncated output."""
+    if len(message) <= max_length:
+        return message
+    if max_length <= 3:
+        return "." * max_length
+    return message[:max_length - 3] + "..."
+
+
+def _format_signal_value(value, decimals: int = 1) -> str:
+    """Format a numeric signal value using the locale-style decimal comma."""
+    if value is None or value == "?":
+        return "?"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.{decimals}f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _format_ping_path(path_hex: str, hash_len: int) -> list:
+    """Split a hexadecimal path into short identifiers for the reply."""
+    if not path_hex:
+        return []
+    try:
+        chunk_size = max(1, int(hash_len)) * 2
+    except (TypeError, ValueError):
+        chunk_size = 2
+    return [path_hex[index:index + chunk_size][:4] for index in range(0, len(path_hex), chunk_size)]
+
+
+def format_ping_response(result: dict, max_length: int = MAX_MESSAGE_LENGTH) -> str:
+    """Format a compact ping result with up to three path hops per line."""
+    name = result.get("name") or "Contato"
+    if not result.get("success"):
+        return truncate_message(f"👂 {name}: {result.get('error', 'sem resposta')}", max_length)
+
+    rssi = _format_signal_value(result.get("rssi"), decimals=0)
+    snr = _format_signal_value(result.get("snr"), decimals=1)
+    hop_count = result.get("in_path_len", 0)
+    try:
+        hop_count = int(hop_count)
+    except (TypeError, ValueError):
+        hop_count = 0
+
+    lines = [f"👂 {name}: R 📶 {rssi}dBm/{snr}dB | 🛣️ {hop_count} saltos"]
+    path = _format_ping_path(result.get("in_path", ""), result.get("in_path_hash_len", 1))
+    for index in range(0, len(path), 3):
+        lines.append("<".join(path[index:index + 3]))
+
+    return truncate_message("\r\n".join(lines), max_length)
+
+
+def resolve_ping_pubkey(target: str, known_nodes: dict) -> tuple[Optional[str], Optional[str]]:
+    """Resolve a full public key or a unique known-node prefix."""
+    target = target.lower()
+    if len(target) == 64:
+        return target, None
+
+    matches = [pubkey for pubkey in known_nodes if pubkey.lower().startswith(target)]
+    if len(matches) == 1:
+        return matches[0], None
+    if not matches:
+        return None, f"Contato nao encontrado: {target}"
+    return None, f"Prefixo ambiguo: {target}"
+
+
 async def resolve_configured_channel(meshcore, max_channels: int = 40) -> int:
     """Find the exact configured private channel on the connected device."""
     if not MESHCORE_CHANNEL_NAME:
@@ -537,6 +610,53 @@ async def on_channel_message(event, meshcore=None, allowed_channel_idx: Optional
         await handle_channel_mention(meshcore, channel_idx, text)
 
 
+async def ping_contact(meshcore, pubkey: str, name: str) -> dict:
+    """Discover a contact's return path and capture its received signal."""
+    rx_logs = []
+
+    def capture_path_rx(event):
+        payload = event.payload or {}
+        if payload.get("payload_typename") == "PATH":
+            rx_logs.append(payload)
+
+    subscription = meshcore.subscribe(EventType.RX_LOG_DATA, capture_path_rx)
+    try:
+        path_event = await meshcore.commands.send_path_discovery_sync(
+            pubkey,
+            timeout=PING_TIMEOUT,
+        )
+        if path_event is not None:
+            # Allow a matching RX_LOG_DATA callback to run before reading metrics.
+            await asyncio.sleep(0.1)
+    except Exception as exc:
+        return {
+            "success": False,
+            "name": name,
+            "error": f"erro: {exc}",
+        }
+    finally:
+        subscription.unsubscribe()
+
+    if path_event is None or path_event.type == EventType.ERROR:
+        return {
+            "success": False,
+            "name": name,
+            "error": "sem resposta",
+        }
+
+    payload = path_event.payload or {}
+    rx = rx_logs[-1] if rx_logs else {}
+    return {
+        "success": True,
+        "name": name,
+        "rssi": rx.get("rssi", "?"),
+        "snr": rx.get("snr", "?"),
+        "in_path_len": payload.get("in_path_len", 0),
+        "in_path_hash_len": payload.get("in_path_hash_len", 1),
+        "in_path": payload.get("in_path", ""),
+    }
+
+
 async def handle_channel_mention(meshcore, channel_idx: int, text: str):
     """Handle @mentions in channel messages for METAR and CLIMA commands."""
     if not text:
@@ -558,11 +678,40 @@ async def handle_channel_mention(meshcore, channel_idx: int, text: str):
     if re.search(r'\b(AJUDA|HELP)\b', command_upper):
         print(f"❓ Channel #{channel_idx}: @mention AJUDA/HELP request")
         header = f"Comandos @[{bot_name_with_emoji}]:"
-        help_msg = f"{header}\r\n-CLIMA (clima atual em RAO)\r\n-METAR<ICAO> (ex: METAR SBRP)\r\n-STATUS<PUBKEY> (telemetria repetidora)"
+        help_msg = f"{header}\r\n-CLIMA (clima atual em RAO)\r\n-METAR<ICAO> (ex: METAR SBRP)\r\n-STATUS<PUBKEY> (telemetria repetidora)\r\n-PING<PUBKEY> (rota e sinal do contato)"
         await meshcore.commands.send_chan_msg(channel_idx, help_msg)
         print(f"   ✅ Help sent to channel #{channel_idx}")
         return
-    
+
+    # Handle PING command
+    ping_match = re.fullmatch(r"PING(?:\s+([A-Fa-f0-9]{8,64}))?", command_text, re.IGNORECASE)
+    if ping_match:
+        target = ping_match.group(1)
+        if not target:
+            help_msg = "Para PING adicione a chave publica: PING <PUBKEY>"
+            await meshcore.commands.send_chan_msg(channel_idx, help_msg)
+            return
+
+        known_nodes = load_known_nodes()
+        pubkey, resolve_error = resolve_ping_pubkey(target, known_nodes)
+        if resolve_error:
+            await meshcore.commands.send_chan_msg(channel_idx, resolve_error)
+            return
+
+        node_info = known_nodes.get(pubkey, {})
+        name = node_info.get("name") or f"Contato {pubkey[:12]}..."
+        print(f"📶 Channel #{channel_idx}: @mention PING request for {pubkey[:12]}...")
+        result = await ping_contact(meshcore, pubkey, name)
+        response = format_ping_response(result)
+        await meshcore.commands.send_chan_msg(channel_idx, response)
+        print(f"   ✅ PING response sent to channel #{channel_idx}")
+        return
+
+    if re.search(r"\bPING\b", command_upper):
+        help_msg = "Para PING adicione a chave publica: PING <PUBKEY>"
+        await meshcore.commands.send_chan_msg(channel_idx, help_msg)
+        return
+
     # Handle STATUS command
     status_match = re.search(r'\bSTATUS\s+([A-Fa-f0-9]{64})\b', command_text, re.IGNORECASE)
     if status_match:
